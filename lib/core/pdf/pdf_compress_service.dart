@@ -77,10 +77,27 @@ final class PdfCompressResult {
 ///    (image-heavy scans) where real wins live.
 /// 3. Honesty rule: if neither beats the original, the caller keeps the
 ///    original file and the result says so.
+/// Optional injected raster renderer for the lossy compression pass.
+/// Follows the same pattern as [PageRenderer] in pdf_to_images_service.dart.
+typedef PdfRasterRenderer = Future<Uint8List?> Function(
+  PdfCompressArgs args,
+  int originalBytes,
+  void Function(double fraction)? onProgress,
+  bool Function()? isCancelled,
+);
+
+/// pdfx raster pass requires native platform channels (Android, iOS, macOS, Windows)
+/// and cannot run in headless unit test environments or unsupported host OSes like Linux.
+bool get _canAttemptRaster {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) return false;
+  return Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+}
+
 Future<PdfCompressResult> pdfCompressTask(
   PdfCompressArgs args, {
   void Function(double fraction)? onProgress,
   bool Function()? isCancelled,
+  PdfRasterRenderer? rasterRenderer,
 }) async {
   final original = File(args.inputPath);
   final originalBytes = original.lengthSync();
@@ -99,14 +116,17 @@ Future<PdfCompressResult> pdfCompressTask(
   if (structural == null || structural.length >= originalBytes * 0.9) {
     // Raster only when the structural pass didn't already win big —
     // it is the expensive, lossy path.
-    try {
-      raster = await _rasterPass(args, originalBytes, onProgress, isCancelled);
-    } on JobCancelled {
-      rethrow;
-    } on PureError {
-      rethrow;
-    } catch (_) {
-      // Rendering is best-effort; structural result stands if raster fails.
+    if (rasterRenderer != null || _canAttemptRaster) {
+      try {
+        final runner = rasterRenderer ?? _rasterPass;
+        raster = await runner(args, originalBytes, onProgress, isCancelled);
+      } on JobCancelled {
+        rethrow;
+      } on PureError {
+        rethrow;
+      } catch (_) {
+        // Rendering is best-effort; structural result stands if raster fails.
+      }
     }
   }
   onProgress?.call(0.95);
