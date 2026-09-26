@@ -41,7 +41,6 @@ the build — not enabled by default to keep secrets out of the repo.
 ## Also verify locally
 
 ```bash
-cd purefile
 flutter analyze && flutter test
 bash tool/egress_check.sh
 flutter build apk --release --split-per-abi
