@@ -19,8 +19,8 @@
 1. Open the repo on GitHub → **Actions** → latest *Android APK* run
 2. Scroll to **Artifacts** → download:
    - `purefile-arm64-apk` — every modern phone (use this one)
-   - `purefile-arm32-apk` — older devices
-   - `purefile-universal-apk` — one APK for everything (largest)
+   - `purefile-arm32-apk` — older 32-bit devices
+   - `purefile-x86_64-apk` — emulators and ChromeOS
 3. Unzip, copy the `.apk` to the phone, open it, allow "install unknown
    apps" when prompted.
 
