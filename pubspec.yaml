@@ -1,0 +1,46 @@
+name: purefile
+description: "PureFile — a private, offline file toolbox. PDF, image and ZIP tools that never upload your files."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+  flutter_riverpod: ^2.6.1
+  go_router: ^16.3.0
+  file_picker: ^10.3.7
+  open_filex: ^4.7.0
+  share_plus: ^12.0.2
+  path_provider: ^2.1.5
+  shared_preferences: ^2.5.3
+  archive: 4.0.9
+  syncfusion_flutter_pdf: ^34.2.9
+  pdfx: ^2.11.0
+  image: 4.9.0
+  camera: ^0.12.1
+  camera_android_camerax: ^0.7.4+8
+  google_mlkit_text_recognition: ^0.17.1
+  local_auth: ^3.0.2
+  flutter_secure_storage: ^10.3.4
+  cryptography: ^2.9.0
+  receive_sharing_intent: 1.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+
+  # F17: brand assets (generated master icon ships with the app for the
+  # about screen and settings).
+  assets:
+    - assets/brand/icon_1024.png
