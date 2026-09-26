@@ -75,8 +75,10 @@ test/              243 tests mirroring lib/
 | `docs/requirements.md` | product requirements (F-numbers) |
 | `docs/architecture.md` | layering rules, pipeline contract |
 | `docs/design.md` | locked design language & palette |
-| `docs/edge-cases.md` | the 40 edge cases the tools must survive |
+| `docs/edge-cases.md` | the 51 edge cases the tools must survive |
 | `docs/hardening.md` | F18 QA matrix: what's build-proven / test-proven / device-only |
+| `docs/tester-guide.md` | **manual QA for testers**: per-feature scripts, device checklist, pass/fail template |
+| `docs/maintenance.md` | **longterm maintainability**: module blast-radius map, dependency risks, upgrade procedures, gotchas |
 | `docs/store-listing.md` | store copy, privacy policy text, data-safety answers |
 | `docs/ci.md` | GitHub Actions APK builds + how to install locally |
 | `docs/ui-polish.md` | F19 polish pass: size report, UX decisions |
