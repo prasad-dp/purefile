@@ -45,3 +45,4 @@ flutter:
   # about screen and settings).
   assets:
     - assets/brand/icon_1024.png
+    - assets/brand/icon_launcher.png

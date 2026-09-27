@@ -38,6 +38,7 @@ Impact levels: 🔴 **core** (change = re-test everything) · 🟠 **sensitive**
 | Privacy/usage | `lib/core/privacy/` | 🟢 | `pf.usage.*` counters serialized through one async queue (lost-update test); crash ring buffer cap 100, append never throws. |
 | Tool flow screen | `lib/features/tools/tool_flow_screen.dart` | 🟡 | One screen drives 10 tools via `ToolUiSpec` + options cards. Adding a tool option = spec + options state + card. |
 | Screens (per feature) | `lib/features/*/` | 🟢 | Self-contained Riverpod screens; F19b iOS-craft styling via shared widgets. |
+| Appearance | `lib/core/appearance.dart` + `lib/widgets/theme_toggle.dart` | 🟡 | Theme-mode state + persistence. MaterialApp watches `themeModeProvider`; the startup restore gate must stay BEFORE share-intake start in app.dart (launch brightness). `nextThemeMode` is shared by all controls — don't fork the cycle. |
 
 ### Change-safety rules
 
@@ -46,7 +47,10 @@ Impact levels: 🔴 **core** (change = re-test everything) · 🟠 **sensitive**
 2. **Vault or ZIP security code**: read the relevant `hardening.md` section
    first; the tests encode attack scenarios, not just behavior.
 3. **Pipeline/isolate changes**: manually cancel a long job on device —
-   cancel-cleans is contract #4.
+   cancel-cleans is contract #4. ISOLATE RULE: anything sent to
+   `runJob`/`Isolate.spawn`/`Isolate.run` must close over locals and
+   top-level functions ONLY — never a controller/State tear-off or `this.*`
+   field reads (device-only failure; host tests can't reproduce it).
 4. **Router changes**: add the static-route-precedence test case if you add
    any static route.
 5. **After ANY dependency change**: run `tool/egress_check.sh` (see §4).
@@ -179,6 +183,7 @@ reading their data.
 | --- | --- | --- |
 | Outputs history | SharedPreferences `pf.history.v1` | JSON list, newest-first, 7-day auto-purge (injected clock), cap 400, orphan cleanup, corrupt JSON → empty list. Bump the version suffix only with a reader that understands both formats. |
 | Usage counters | SharedPreferences `pf.usage.*` | Counters + bytes + per-tool map; one async queue serializes mutations; reset supported. Same versioning rule. |
+| Theme mode | SharedPreferences `pf.appearance.mode` | "system" / "light" / "dark"; read into `themeModeProvider` at startup (before first frame), written by any theme control. Unknown values → system. Trivial format, but keep the string names stable — `ThemeMode.name` is the writer. |
 | Crash log | file (ring buffer, cap 100) | `<iso8601> <source>: <flat message>`; malformed lines skipped; append never throws. |
 | Vault wrapped key | secure_storage; blob `salt(16)‖cipher(32)‖mac(16)‖nonce(12)` | PBKDF2-HMAC-SHA256 150k iters. **Never change** layout or iteration count — unreadable vaults. Forgotten secret = unrecoverable by design. |
 | Vault manifest | `documents/vault/manifest.pfv` | AES-GCM encrypted JSON of entry names; file names never on disk in plaintext (tested via contiguous-sublist check). |
@@ -224,6 +229,7 @@ native code.
 | Encrypted-PDF test expects an Exception | syncfusion throws ArgumentError-style **Errors** | Classification is message-based — see pdf services |
 | pdfx/ML Kit crash in unit tests | Platform channels in plain isolates | Tests inject stub `PageRenderer`/`PageRecognizer`; workers need `RootIsolateToken` + `BackgroundIsolateBinaryMessenger.ensureInitialized` |
 | Biometrics dead after a mainactivity refactor | FlutterActivity instead of FlutterFragmentActivity | Keep `FlutterFragmentActivity()` in MainActivity.kt |
+| **"object is unsendable — Class: _AsyncCompleter / WidgetsFlutterBinding…" on device at Start** | A closure passed to `runJob`/`Isolate.spawn`/`Isolate.run` captures `this` (controller/State tear-off, or reads `this.*` fields) → drags the element tree into the spawn | Closures sent across isolates must capture ONLY locals + top-level functions. Copy State fields into locals BEFORE the closure; tool dispatch stays in top-level `runToolTask`. Regression-guarded in `test/core/isolate_spawn_safety_test.dart` |
 | Share intent dead after dependency change | receive_sharing_intent 1.9.0 + compileSdk 37 mismatch | Stay on 1.8.1 until compileSdk 37; then revisit JVM pin together |
 | Vault key/params change considered | Breaks existing vaults | Never change blob layout/PBKDF2 iters (§5) |
 | CI red on INTERNET grep | Dependency re-introduced INTERNET into the merged manifest | Check the `tools:node="remove"` rule is intact; re-verify merged manifest; record in progress.md |

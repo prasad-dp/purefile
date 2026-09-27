@@ -86,6 +86,12 @@ release build has no INTERNET permission, so the OS itself forbids it.
 | 3.8 | Rotation mid-tool | Rotate during a running job → job continues, progress preserved |
 | 3.9 | Background/foreground mid-job | App backgrounded during a job → return → job still running or finished correctly |
 | 3.10 | Crash log sanity | Settings → Privacy → Crash log: normally empty; the screen states "local-only · never sent anywhere" |
+| 3.11 | Theme toggle in hero | Tap the sun/moon button next to the title: one tap flips light ⇄ dark; in Auto the icon shows what's active (sun by day / moon at night) with a small dot badge; app re-themes instantly |
+| 3.12 | Theme persistence | Set Dark, kill the app, relaunch: starts dark with NO light flash; set Light, relaunch: starts light; Auto follows the OS setting |
+| 3.13 | Settings segmented control | Settings → Appearance: Auto/Light/Dark segmented control reflects the current mode; selecting re-themes instantly; both controls (hero + settings) always agree |
+| 3.14 | Light-mode card separation | In LIGHT mode every card (home tools, settings groups, history rows, tool flow) floats on the gray background with a visible whisper shadow — no flat white-on-gray blending |
+| 3.15 | Sign pad in dark mode | Sign & Stamp: the drawing canvas stays WHITE with a visible border in both modes (white background is intentional — export requires it); strokes clearly visible |
+| 3.16 | Dark-mode sweep | Toggle through all screens (home, tools, vault, history, settings, privacy, crash log, onboarding): no white flashes, no invisible borders/text, hairlines visible on cards |
 
 ---
 

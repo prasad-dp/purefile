@@ -159,13 +159,18 @@ final class SplitOptionsState {
         SplitMode.extract => selectionValid,
       };
 
-  SplitOptionsState withMode(SplitMode newMode) {
-    final next = SplitOptionsState(mode: newMode);
-    next.intervalController.text = intervalController.text;
-    next.rangesController.text = rangesController.text;
-    next.selectionController.text = selectionController.text;
-    return next;
-  }
+  SplitOptionsState._(
+      this.mode, this.intervalController, this.rangesController,
+      this.selectionController);
+
+  /// Re-publishes this options state so Riverpod listeners re-evaluate.
+  /// BUGFIX (split options never synced): the TextFields only wrote into
+  /// their TextEditingControllers — the provider never re-emitted, so
+  /// errorText and the Start button's `valid` stayed frozen until the user
+  /// left the screen and came back. Publishing a NEW instance that SHARES
+  /// the same controllers keeps focus/cursor intact and notifies listeners.
+  SplitOptionsState publish(SplitMode newMode) => SplitOptionsState._(
+      newMode, intervalController, rangesController, selectionController);
 }
 
 sealed class JobFlowState {
@@ -229,7 +234,8 @@ class JobFlowController extends Notifier<JobFlowState> {
     return _outputDir = dir;
   }
 
-  /// F1/F2/F3: pick then validate. Rejections are shown, not fatal.
+  /// F1/F2/F3: pick then validate. Replaces any current selection (the
+  /// initial pick + share intake). Rejections are shown, not fatal.
   /// [maxFiles] caps how many files this tool accepts (e.g. Compress PDF = 1);
   /// extras land in `rejections` instead of failing the whole selection.
   Future<void> selectFiles(
@@ -254,6 +260,52 @@ class JobFlowController extends Notifier<JobFlowState> {
     state = JobReady(files: accepted, rejections: rejected);
   }
 
+  /// "Add more files": validates the NEW picks and APPENDS them to the
+  /// current selection (deduped by path — picking the same file twice keeps
+  /// it once). The combined list still respects [maxFiles]: extras become
+  /// rejections. No-op when there is nothing to add.
+  Future<void> addFiles(
+    List<String> paths, {
+    Set<PfMagic>? allowedMagic,
+    int? maxFiles,
+  }) async {
+    final current = state;
+    if (paths.isEmpty) return;
+    if (current is! JobReady) {
+      await selectFiles(paths, allowedMagic: allowedMagic, maxFiles: maxFiles);
+      return;
+    }
+
+    final result = await validatePick(paths, allowedMagic: allowedMagic);
+    if (result.accepted.isEmpty && result.rejected.isNotEmpty) {
+      // Nothing valid among the new picks — surface why, keep the selection.
+      state = JobReady(
+        files: current.files,
+        rejections: [...current.rejections, ...result.rejected],
+      );
+      return;
+    }
+
+    final existing = current.files;
+    final fresh = [
+      for (final a in result.accepted)
+        if (!existing.any((e) => e.path == a.path)) a,
+    ];
+
+    final combined = [...existing, ...fresh];
+    var rejected = [...current.rejections, ...result.rejected];
+    var kept = combined;
+    if (maxFiles != null && combined.length > maxFiles) {
+      rejected = [
+        ...rejected,
+        for (final extra in combined.skip(maxFiles))
+          (extra.name, const SingleFileOnly()),
+      ];
+      kept = combined.take(maxFiles).toList();
+    }
+    state = JobReady(files: kept, rejections: rejected);
+  }
+
   /// Reorders the picked files (merge tool — F10). No-op unless ready.
   /// [newIndex] is already adjusted for the removed item (onReorderItem).
   void reorder(int oldIndex, int newIndex) {
@@ -266,134 +318,67 @@ class JobFlowController extends Notifier<JobFlowState> {
   }
 
   /// F2 (batch caps + storage) then F4 (isolate run) with per-tool args.
+  ///
+  /// ISOLATE-SAFETY RULE: the task closure passed to runJob must capture ONLY
+  /// sendable data (the args object) and TOP-LEVEL functions. An instance
+  /// tear-off (e.g. `_runTool`) captures `this` — and through the Riverpod
+  /// ref/container the watched ELEMENT tree — making it unsendable:
+  /// Isolate.spawn throws "object is unsendable" on device at the very first
+  /// Start tap (host tests without a widget tree never reproduce it).
   Future<void> start({ToolArgsBuilder? makeArgs, String? toolId}) async {
     final current = state;
     if (current is! JobReady) return;
     _runningToolId = toolId;
-    final outputDir = await _ensureOutputDir();
+    String? outputDir;
     try {
+      outputDir = await _ensureOutputDir();
       validateBatch(current.files, outputDirectory: outputDir);
-    } on PureError catch (e) {
-      state = JobError(e);
-      return;
-    }
 
-    final args = makeArgs?.call(outputDir) ??
-        CopyThroughArgs(
-          jobs: [
-            for (final f in current.files) (f.path, f.name, f.sizeBytes),
-          ],
-          outputDir: outputDir,
-        );
+      final args = makeArgs?.call(outputDir) ??
+          CopyThroughArgs(
+            jobs: [
+              for (final f in current.files) (f.path, f.name, f.sizeBytes),
+            ],
+            outputDir: outputDir,
+          );
 
-    state = const JobRunning(fraction: 0);
-    _handle = runner.runJob<Object?>(
-      task: (ctx) => _runTool(args, ctx),
-    );
+      state = const JobRunning(fraction: 0);
+      _handle = runner.runJob<Object?>(
+        task: (ctx) => runToolTask(args, ctx), // top-level — captures only args
+      );
 
-    _handle!.events.listen((event) {
-      switch (event) {
-        case runner.JobProgress<Object?>(:final fraction, :final label):
-          state = JobRunning(fraction: fraction, label: label);
-        case runner.JobDone<Object?>(:final result):
-          final outputs = _toOutputs(result);
-          state = JobDone(outputs: outputs);
-          _recordHistory(outputs);
-        case runner.JobFailed<Object?>(:final error):
-          // A cancel triggers a JobFailed(JobCancelled) event too — keep the
-          // clean Idle state set by cancel() instead of surfacing an error.
-          if (!(_handle?.isCancelled ?? false)) state = JobError(error);
-      }
-    });
+      _handle!.events.listen((event) {
+        switch (event) {
+          case runner.JobProgress<Object?>(:final fraction, :final label):
+            state = JobRunning(fraction: fraction, label: label);
+          case runner.JobDone<Object?>(:final result):
+            final outputs = _toOutputs(result);
+            state = JobDone(outputs: outputs);
+            _recordHistory(outputs);
+          case runner.JobFailed<Object?>(:final error):
+            // A cancel triggers a JobFailed(JobCancelled) event too — keep
+            // the clean Idle state set by cancel() instead of surfacing it.
+            if (!(_handle?.isCancelled ?? false)) state = JobError(error);
+        }
+      });
 
-    try {
       await _handle!.future;
     } on JobCancelled {
       state = const JobIdle();
-      cleanupTempFiles(outputDir);
+      if (outputDir != null) cleanupTempFiles(outputDir);
     } on PureError {
       // State already set by the event stream.
-      cleanupTempFiles(outputDir);
+      if (outputDir != null) cleanupTempFiles(outputDir);
+    } catch (e) {
+      // Non-typed failures (e.g. a platform-channel hiccup while resolving
+      // the output dir) must never die silently with the UI stuck on Ready.
+      state = JobError(UnknownFailure(e.toString()));
+      if (outputDir != null) cleanupTempFiles(outputDir);
     }
   }
 
-  /// Runs the matching per-tool task. All tasks report progress + honor
-  /// cooperative cancel through the job context.
-  Future<Object?> _runTool(Object? args, runner.PfJobContext ctx) async {
-    switch (args) {
-      case PdfCompressArgs():
-        return pdfCompressTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case MergeArgs():
-        return pdfMergeTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case SplitArgs():
-        return pdfSplitTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case ImagesToPdfArgs():
-        return imagesToPdfTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case PdfToImagesArgs():
-        return pdfToImagesTask(
-          args,
-          renderer: pdfxPageRenderer,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case OcrArgs():
-        return ocrTask(
-          args,
-          recognize: mlkitPageRecognizer(),
-          renderPage: ocrPageRaster,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case ImageCompressArgs():
-        return imageCompressTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case ImageConvertArgs():
-        return imageConvertTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case ZipCreateArgs():
-        return zipCreateTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case ZipExtractArgs():
-        return zipExtractTask(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      case CopyThroughArgs():
-        return copyThrough(
-          args,
-          onProgress: ctx.report,
-          isCancelled: () => ctx.isCancelled,
-        );
-      default:
-        throw const UnknownFailure('Unknown tool arguments');
-    }
-  }
+  // NOTE: tool dispatch lives in the TOP-LEVEL runToolTask() below — it
+  // must stay out of this class or the spawn closure becomes unsendable.
 
   List<OutputInfo> _toOutputs(Object? result) => switch (result) {
         PdfCompressResult(
@@ -596,6 +581,87 @@ class JobFlowController extends Notifier<JobFlowState> {
     _handle = null;
     _runningToolId = null;
     state = const JobIdle();
+  }
+}
+
+/// Runs the matching per-tool task for [args]. TOP-LEVEL on purpose: this is
+/// the entry sent across the isolate boundary, and a top-level function
+/// reference is sendable while an instance tear-off would drag the controller
+/// (and with it the whole widget tree) into the spawn — the "object is
+/// unsendable" device failure this shape fixed.
+Future<Object?> runToolTask(Object? args, runner.PfJobContext ctx) async {
+  switch (args) {
+    case PdfCompressArgs():
+      return pdfCompressTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case MergeArgs():
+      return pdfMergeTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case SplitArgs():
+      return pdfSplitTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case ImagesToPdfArgs():
+      return imagesToPdfTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case PdfToImagesArgs():
+      return pdfToImagesTask(
+        args,
+        renderer: pdfxPageRenderer,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case OcrArgs():
+      return ocrTask(
+        args,
+        recognize: mlkitPageRecognizer(),
+        renderPage: ocrPageRaster,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case ImageCompressArgs():
+      return imageCompressTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case ImageConvertArgs():
+      return imageConvertTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case ZipCreateArgs():
+      return zipCreateTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case ZipExtractArgs():
+      return zipExtractTask(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    case CopyThroughArgs():
+      return copyThrough(
+        args,
+        onProgress: ctx.report,
+        isCancelled: () => ctx.isCancelled,
+      );
+    default:
+      throw const UnknownFailure('Unknown tool arguments');
   }
 }
 

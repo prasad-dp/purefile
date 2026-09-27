@@ -59,9 +59,18 @@ class _ToolFlowScreenState extends ConsumerState<ToolFlowScreen> {
   @override
   void initState() {
     super.initState();
-    // F16: entered with shared files pending (from the chooser) — auto-fill
-    // the selection once, validated against this tool's own spec.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _intakeShared());
+    // BUGFIX (cross-tool selection leak): the flow state is app-scoped, so a
+    // JobReady left over from another tool (e.g. Merge) would otherwise SHOW
+    // UP HERE (e.g. Split) with the old files pre-selected. Entering a tool
+    // always starts from Idle — reset in the post-frame hook (providers must
+    // not be modified during widget build); the share intake below then
+    // fills a FRESH selection. First frame may flash the stale state for a
+    // sub-frame moment; the post-frame fix keeps every interaction clean.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(jobFlowProvider.notifier).reset();
+      _intakeShared();
+    });
   }
 
   void _intakeShared() {
@@ -124,14 +133,21 @@ class _ToolFlowScreenState extends ConsumerState<ToolFlowScreen> {
                   tool: tool,
                   files: files,
                   outputDir: outputDir,
+                  // BUGFIX (Start dead on split): ref.watch is illegal
+                  // inside a tap callback — it threw when Start was tapped.
+                  // Options are already live via the build's watch above;
+                  // read() here is the legal one-shot lookup.
                   options: tool.id == 'pdf_compress'
                       ? ref.read(pdfCompressQualityProvider)
                       : tool.id == 'pdf_split'
-                          ? ref.watch(splitOptionsProvider)
+                          ? ref.read(splitOptionsProvider)
                           : null,
                 ),
               ),
-              onPickMore: () => _pickAndValidate(context, controller, loc),
+              // BUGFIX (add-more replaced the selection): append via
+              // addFiles — selectFiles overwrote the list with only the
+              // newly picked file.
+              onPickMore: () => _pickMore(context, controller, loc),
             ),
           JobRunning(:final fraction, :final label) => _RunningStage(
               fraction: fraction,
@@ -162,6 +178,27 @@ class _ToolFlowScreenState extends ConsumerState<ToolFlowScreen> {
     if (paths.isEmpty) return;
     final spec = _spec(loc);
     await controller.selectFiles(
+      paths,
+      allowedMagic: spec.allowedMagic,
+      maxFiles: spec.maxFiles,
+    );
+  }
+
+  /// "Add more files" from the Ready stage: APPEND to the selection.
+  Future<void> _pickMore(
+    BuildContext context,
+    JobFlowController controller,
+    AppLocalizations loc,
+  ) async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.any,
+      withData: false,
+    );
+    final paths = result?.paths.whereType<String>().toList() ?? const [];
+    if (paths.isEmpty) return;
+    final spec = _spec(loc);
+    await controller.addFiles(
       paths,
       allowedMagic: spec.allowedMagic,
       maxFiles: spec.maxFiles,
@@ -618,14 +655,20 @@ class SplitOptions extends ConsumerWidget {
               selected: {options.mode},
               onSelectionChanged: (s) => ref
                   .read(splitOptionsProvider.notifier)
-                  .state = options.withMode(s.first),
+                  .state = options.publish(s.first),
             ),
             const SizedBox(height: 12),
+            // BUGFIX (options out of sync): every field re-publishes the
+            // options state on change — previously typing never notified
+            // Riverpod, so errorText/Start stayed stale until re-entry.
             switch (options.mode) {
               SplitMode.everyN => TextField(
                   controller: options.intervalController,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (_) => ref
+                      .read(splitOptionsProvider.notifier)
+                      .state = options.publish(options.mode),
                   decoration: InputDecoration(
                     labelText: loc.splitIntervalLabel,
                     errorText: options.intervalValid ? null : loc.splitIntervalError,
@@ -633,6 +676,9 @@ class SplitOptions extends ConsumerWidget {
                 ),
               SplitMode.ranges => TextField(
                   controller: options.rangesController,
+                  onChanged: (_) => ref
+                      .read(splitOptionsProvider.notifier)
+                      .state = options.publish(options.mode),
                   decoration: InputDecoration(
                     labelText: loc.splitRangesLabel,
                     helperText: loc.splitRangesHint,
@@ -641,6 +687,9 @@ class SplitOptions extends ConsumerWidget {
                 ),
               SplitMode.extract => TextField(
                   controller: options.selectionController,
+                  onChanged: (_) => ref
+                      .read(splitOptionsProvider.notifier)
+                      .state = options.publish(options.mode),
                   decoration: InputDecoration(
                     labelText: loc.splitSelectionLabel,
                     helperText: loc.splitSelectionHint,

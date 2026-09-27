@@ -171,6 +171,32 @@ void main() {
     expect(File(src).existsSync(), isTrue);
   });
 
+  test('viewTo + plainBytesOf decrypt in place without touching the vault copy',
+      () async {
+    await vault.initialize('long enough secret');
+    final src = File('${root.path}/photo.png')..writeAsBytesSync(List.filled(999, 7));
+    await vault.importFile(src.path);
+    final item = (await vault.loadItems()).single;
+
+    final views = Directory('${root.path}/views')..createSync();
+    final viewPath = await vault.viewTo(item.id, views.path);
+    expect(File(viewPath).readAsBytesSync(), List.filled(999, 7));
+    // Vault copy untouched, original name preserved.
+    expect((await vault.loadItems()).single.id, item.id);
+    expect(viewPath.endsWith('photo.png'), isTrue);
+
+    final plain = await vault.plainBytesOf(item.id);
+    expect(plain.length, 999);
+  });
+
+  test('wipeViews clears every decrypted view file', () async {
+    final dir = Directory('${root.path}/views2')..createSync();
+    File('${dir.path}/a.txt').writeAsStringSync('x');
+    File('${dir.path}/b.pdf').writeAsStringSync('y');
+    vault.wipeViews(dir.path);
+    expect(dir.listSync(), isEmpty);
+  });
+
   test('blob names are random hex ids, not file names', () async {
     await vault.initialize('long enough secret');
     final a = await vault.importFile(await writeSource('secret-name.bin', bytes(32)));

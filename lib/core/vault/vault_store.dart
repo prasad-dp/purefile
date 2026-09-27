@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../errors.dart';
@@ -115,7 +116,9 @@ class VaultStore {
     if (secret.length < 8) throw ArgumentError('secret too short');
     _dir.createSync(recursive: true);
     final vaultKey = VaultCrypto.newVaultKey();
-    final wrapped = await VaultCrypto.wrapKey(secret, vaultKey);
+    // PERFORMANCE: PBKDF2 (150k iterations) is CPU-heavy — derive+wrap on a
+    // worker isolate so the UI never freezes during setup.
+    final wrapped = await Isolate.run(() => VaultCrypto.wrapKey(secret, vaultKey));
     await _keyStorage.write(_wrappedKeyStorageKey, base64Encode(wrapped));
     _key = vaultKey;
     await _writeManifest(const []);
@@ -130,7 +133,10 @@ class VaultStore {
     if (wrappedB64 == null) throw StateError('vault not initialized');
     final blob = base64Decode(wrappedB64);
     try {
-      _key = await VaultCrypto.unwrapKey(secret, Uint8List.fromList(blob));
+      // PERFORMANCE: the PBKDF2 derivation inside unwrapKey runs on a worker
+      // isolate — unlock must never freeze the UI for ~a second.
+      _key = await Isolate.run(
+          () => VaultCrypto.unwrapKey(secret, Uint8List.fromList(blob)));
     } on ArgumentError {
       return false;
     }
@@ -181,9 +187,15 @@ class VaultStore {
       );
     }
     final plain = await src.readAsBytes();
-    final cipher = await VaultCrypto.encrypt(key, plain);
     final id = _newId();
-    await atomicWriteBytes(_blobFile(id).path, cipher);
+    final blobPath = _blobFile(id).path;
+    // PERFORMANCE: AES over the whole file + the 3-pass secure delete of the
+    // original are CPU/IO-heavy — both run on a worker isolate. The closure
+    // captures only sendable values (bytes/path/key), never `this`.
+    await Isolate.run(() async {
+      final c = await VaultCrypto.encrypt(key, plain);
+      await atomicWriteBytes(blobPath, c);
+    });
     final item = VaultItem(
       id: id,
       name: name,
@@ -192,7 +204,7 @@ class VaultStore {
     );
     await _writeManifest([...await loadItems(), item]);
     try {
-      await secureDelete(sourcePath);
+      await Isolate.run(() => secureDelete(sourcePath));
     } catch (_) {
       // Best effort: the copy is safely encrypted; a leftover original can be
       // removed by the user. Never mask a successful import over this.
@@ -209,11 +221,57 @@ class VaultStore {
       if (e.id == id) item = e;
     }
     if (item == null) throw StateError('unknown vault item');
-    final plain =
-        await VaultCrypto.decrypt(key, _blobFile(id).readAsBytesSync());
+    final blob = _blobFile(id).readAsBytesSync();
+    // PERFORMANCE: decrypt runs on a worker isolate (closure captures only
+    // sendable bytes/key — never `this`).
+    final plain = await Isolate.run(() => VaultCrypto.decrypt(key, blob));
     final target = uniqueDestination(outputDir, item.name);
     await atomicWriteBytes(target, plain);
     return target;
+  }
+
+  /// In-place view: decrypts to a plaintext file in a PRIVATE app directory
+  /// (never the shared outputs folder) WITHOUT removing the vault copy. The
+  /// file stays encrypted at rest; the plaintext exists only while viewing.
+  /// Returns the decrypted path (name preserved — the viewer sniffs the type
+  /// from the extension).
+  Future<String> viewTo(String id, String viewsDir) async {
+    final key = _requireKey();
+    VaultItem? item;
+    for (final e in await loadItems()) {
+      if (e.id == id) item = e;
+    }
+    if (item == null) throw StateError('unknown vault item');
+    final blob = _blobFile(id).readAsBytesSync();
+    final plain = await Isolate.run(() => VaultCrypto.decrypt(key, blob));
+    Directory(viewsDir).createSync(recursive: true);
+    final target = uniqueDestination(viewsDir, item.name);
+    await atomicWriteBytes(target, plain);
+    return target;
+  }
+
+  /// Plaintext bytes of item [id] — for the OS save dialog (SAF) which takes
+  /// bytes directly. The vault copy stays untouched.
+  Future<Uint8List> plainBytesOf(String id) async {
+    final key = _requireKey();
+    final exists = (await loadItems()).any((e) => e.id == id);
+    if (!exists) throw StateError('unknown vault item');
+    final blob = _blobFile(id).readAsBytesSync();
+    return Isolate.run(() => VaultCrypto.decrypt(key, blob));
+  }
+
+  /// Wipes every decrypted view file (called on hard lock / destroy — the
+  /// plaintext must never outlive the unlocked session).
+  void wipeViews(String viewsDir) {
+    final dir = Directory(viewsDir);
+    if (!dir.existsSync()) return;
+    for (final e in dir.listSync()) {
+      try {
+        if (e is File) e.deleteSync();
+      } catch (_) {
+        // Best effort.
+      }
+    }
   }
 
   /// Secure-erases the encrypted blob and drops the manifest entry.

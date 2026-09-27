@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:open_filex/open_filex.dart';
 
 import '../../core/jobs/job_controller.dart';
 import '../../core/theme.dart' show PfColors;
@@ -167,16 +168,29 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     await ref.read(vaultSessionProvider.notifier).importFile(path);
   }
 
-  Future<void> _export(VaultItem item) async {
-    final docs = await appDocumentsPath();
-    final outDir = '$docs${Platform.pathSeparator}outputs';
-    Directory(outDir).createSync(recursive: true);
+  /// In-place view: decrypts to a private views dir and opens with the OS
+  /// viewer. The vault copy stays; the plaintext is wiped on session end.
+  Future<void> _view(VaultItem item) async {
+    final path = await ref.read(vaultSessionProvider.notifier).viewItem(item.id);
+    if (path == null || !mounted) return;
+    await OpenFilex.open(path);
+  }
+
+  /// Type-aware save-back: the OS save dialog starts in the type-matching
+  /// collection (Pictures for images, Documents for PDFs …) and the file is
+  /// written wherever the user picks. The vault copy stays encrypted.
+  Future<void> _saveBack(VaultItem item) async {
+    final path = await ref
+        .read(vaultSessionProvider.notifier)
+        .saveItemBack(item.id, item.name);
     if (!mounted) return;
-    await ref.read(vaultSessionProvider.notifier).exportTo(item.id, outDir);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppLocalizations.of(context)!.vaultExportDone(item.name))),
-    );
+    if (path != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                AppLocalizations.of(context)!.vaultExportDone(item.name))),
+      );
+    }
   }
 
   Future<void> _remove(VaultItem item) async {
@@ -254,10 +268,13 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
               final item = widget.items[i];
               return Card(
                 child: ListTile(
-                  leading: const Icon(Icons.enhanced_encryption_rounded),
+                  leading: Icon(_iconFor(item),
+                      color: Theme.of(context).colorScheme.primary),
                   title: Text(item.name,
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text(_subtitle(loc, item)),
+                  // Tap = view in place (decrypt → OS viewer).
+                  onTap: busy ? null : () => _view(item),
                   trailing: busy
                       ? const SizedBox(
                           width: 20,
@@ -265,14 +282,14 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                           child: CircularProgressIndicator(strokeWidth: 2))
                       : PopupMenuButton<String>(
                           onSelected: (v) => switch (v) {
-                                'export' => _export(item),
+                                'save' => _saveBack(item),
                                 'remove' => _remove(item),
                                 _ => null,
                               },
                           itemBuilder: (_) => [
                             PopupMenuItem(
-                              value: 'export',
-                              child: Text(loc.vaultExport),
+                              value: 'save',
+                              child: Text(loc.vaultSaveBack),
                             ),
                             PopupMenuItem(
                               value: 'remove',
@@ -295,6 +312,22 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
         ? '${(kb / 1024).toStringAsFixed(1)} MB'
         : '${kb.round()} KB';
     return '$size · ${loc.vaultEncryptedNote}';
+  }
+
+  /// Type-flavored icon so the list reads like a file browser.
+  IconData _iconFor(VaultItem item) {
+    final n = item.name.toLowerCase();
+    if (n.endsWith('.pdf')) return Icons.picture_as_pdf_outlined;
+    if (n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') ||
+        n.endsWith('.webp') || n.endsWith('.heic')) {
+      return Icons.image_outlined;
+    }
+    if (n.endsWith('.zip')) return Icons.folder_zip_outlined;
+    if (n.endsWith('.mp4') || n.endsWith('.mov')) return Icons.movie_outlined;
+    if (n.endsWith('.mp3') || n.endsWith('.m4a') || n.endsWith('.wav')) {
+      return Icons.audiotrack_outlined;
+    }
+    return Icons.enhanced_encryption_rounded;
   }
 }
 

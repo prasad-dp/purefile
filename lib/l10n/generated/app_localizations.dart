@@ -166,6 +166,66 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get settingsTitle;
 
+  /// No description provided for @appearanceSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get appearanceSection;
+
+  /// No description provided for @appearanceMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme mode'**
+  String get appearanceMode;
+
+  /// No description provided for @appearanceModeBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose automatic, light, or dark'**
+  String get appearanceModeBody;
+
+  /// No description provided for @appearanceAuto.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto'**
+  String get appearanceAuto;
+
+  /// No description provided for @appearanceLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get appearanceLight;
+
+  /// No description provided for @appearanceDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get appearanceDark;
+
+  /// No description provided for @themeTooltipAutoLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic (day mode) — tap for dark'**
+  String get themeTooltipAutoLight;
+
+  /// No description provided for @themeTooltipAutoDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic (night mode) — tap for light'**
+  String get themeTooltipAutoDark;
+
+  /// No description provided for @themeTooltipLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light theme — tap for dark'**
+  String get themeTooltipLight;
+
+  /// No description provided for @themeTooltipDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark theme — tap for light'**
+  String get themeTooltipDark;
+
   /// No description provided for @privacyDashboard.
   ///
   /// In en, this message translates to:
@@ -633,6 +693,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Export copy'**
   String get vaultExport;
+
+  /// No description provided for @vaultSaveBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Save to device…'**
+  String get vaultSaveBack;
 
   /// No description provided for @vaultExportDone.
   ///

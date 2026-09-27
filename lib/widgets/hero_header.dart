@@ -9,10 +9,16 @@ class HeroHeader extends StatelessWidget {
     super.key,
     required this.title,
     required List<HeroAction> actions,
+    this.leading,
   }) : _actions = actions; // ignore: prefer_initializing_formals
 
   final String title;
   final List<HeroAction> _actions;
+
+  /// An optional control rendered before [_actions] that is NOT a plain icon
+  /// button — e.g. the animated theme toggle (own tap feedback + morph). It
+  /// inherits the header's white-on-gradient look from its caller.
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -36,6 +42,7 @@ class HeroHeader extends StatelessWidget {
                   ),
                 ),
               ),
+              ?leading,
               for (final action in _actions)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
@@ -73,8 +80,10 @@ class SliverHeroHeader extends SliverToBoxAdapter {
     super.key,
     required String title,
     required List<HeroAction> actions,
+    Widget? leading,
   }) : super(
-          child: HeroHeader(title: title, actions: actions),
+          child: HeroHeader(
+              title: title, actions: actions, leading: leading),
         );
 }
 

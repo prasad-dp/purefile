@@ -5,6 +5,9 @@
 //
 // Outputs:
 //   assets/brand/icon_1024.png          — the master icon
+//   assets/brand/icon_launcher.png      — the launcher-look composite
+//       (adaptive background + foreground, circle-masked) so in-app surfaces
+//       can show exactly what launchers render on the home screen
 //   android/.../mipmap-*/ic_launcher.png        — legacy round-rect icons
 //   android/.../mipmap-*/ic_launcher_foreground.png — adaptive foreground
 //   android/.../mipmap-*/ic_launcher_background.png — adaptive background
@@ -34,6 +37,19 @@ void main() {
   // (Android crops a variable circular mask out of 108/108dp).
   final fg = _drawMark(432, canvas: 1024);
   final bg = _drawAdaptiveBackground(1024);
+
+  // In-app "launcher look": the adaptive composite (full-bleed gradient +
+  // centered mark at adaptive scale) pre-masked to a circle — what most
+  // launchers render on the home screen. Used by the settings About row so
+  // the in-app logo matches the installed app icon. Drawn directly (no
+  // compositeImage — fill/alpha semantics differ across image-pkg versions).
+  final launcherLook = img.Image(width: 1024, height: 1024, numChannels: 4);
+  _fillVerticalGradient(launcherLook, 1024, from: teal, to: sky);
+  _drawMarkInto(launcherLook, area: 432, offset: (1024 - 432) ~/ 2);
+  _maskToCircle(launcherLook);
+  File('${masterDir.path}/icon_launcher.png')
+      .writeAsBytesSync(img.encodePng(img.copyResize(launcherLook, width: 512)));
+  stdout.writeln('assets/brand/icon_launcher.png');
 
   // Android legacy + adaptive densities.
   const densities = {
@@ -125,16 +141,39 @@ img.Image _drawIcon(int size, {required bool platformPadding}) {
   return image;
 }
 
-/// Adaptive background layer: full-bleed gradient (the mask crops it).
-img.Image _drawAdaptiveBackground(int size) {
-  final image = img.Image(width: size, height: size);
+/// Zeroes alpha outside the centered circle (launcher-style mask).
+void _maskToCircle(img.Image image) {
+  final size = image.width;
+  final r = size / 2;
+  final transparent = img.ColorUint8.rgba(0, 0, 0, 0);
+  for (var y = 0; y < size; y++) {
+    for (var x = 0; x < size; x++) {
+      final dx = x - r + 0.5;
+      final dy = y - r + 0.5;
+      if (dx * dx + dy * dy > r * r) {
+        image.setPixel(x, y, transparent);
+      }
+    }
+  }
+}
+
+/// Vertical teal→sky gradient fill (shared by the adaptive background and
+/// the in-app launcher look).
+void _fillVerticalGradient(img.Image image, int size,
+    {required int from, required int to}) {
   for (var y = 0; y < size; y++) {
     final t = y / (size - 1);
-    final c = _lerpColor(teal, sky, t);
+    final c = _lerpColor(from, to, t);
     for (var x = 0; x < size; x++) {
       image.setPixel(x, y, c);
     }
   }
+}
+
+/// Adaptive background layer: full-bleed gradient (the mask crops it).
+img.Image _drawAdaptiveBackground(int size) {
+  final image = img.Image(width: size, height: size);
+  _fillVerticalGradient(image, size, from: teal, to: sky);
   return image;
 }
 

@@ -1,7 +1,11 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 
+import '../../core/jobs/job_controller.dart' show appDocumentsPath;
 import '../../core/privacy/usage_store.dart';
 import '../../core/vault/vault_store.dart';
 
@@ -256,6 +260,7 @@ class VaultSession extends Notifier<VaultSessionState> {
       state = state.withPhase(VaultPhase.lockedSoft);
       return;
     }
+    await _wipeViews();
     store.hardLock();
     await _refreshPhase();
   }
@@ -270,6 +275,7 @@ class VaultSession extends Notifier<VaultSessionState> {
     if (bgAt == null || !store.isUnlocked) return;
     final away = DateTime.now().difference(bgAt);
     if (away >= _hardLockAfter) {
+      await _wipeViews();
       store.hardLock();
     } else if (away >= _softLockAfter) {
       // Soft lock: keep the key in memory, force biometric re-entry.
@@ -297,6 +303,8 @@ class VaultSession extends Notifier<VaultSessionState> {
   Future<void> importFile(String sourcePath) async {
     state = state.copyWith(busy: true, lastError: null);
     try {
+      // PERFORMANCE: the heavy parts (AES, 3-pass secure delete) run inside
+      // the store on worker isolates — the UI stays responsive.
       final item = await store.importFile(sourcePath);
       // F15 privacy counters: one vaulted file, its plaintext size.
       try {
@@ -326,6 +334,65 @@ class VaultSession extends Notifier<VaultSessionState> {
     }
   }
 
+  /// In-place view: decrypts to a private per-session views dir and hands
+  /// (path) to the caller for OpenFilex. The vault copy stays; the plaintext
+  /// is wiped when the session ends (hard lock / destroy / new view round).
+  Future<String?> viewItem(String id) async {
+    state = state.copyWith(busy: true, lastError: null);
+    try {
+      final docs = await appDocumentsPath();
+      final viewsDir = '$docs${Platform.pathSeparator}vault_views';
+      return await store.viewTo(id, viewsDir);
+    } catch (e) {
+      state = state.copyWith(lastError: e.toString());
+      return null;
+    } finally {
+      state = state.copyWith(busy: false);
+    }
+  }
+
+  /// Type-aware save-back: runs the OS save dialog (SAF on Android — it
+  /// starts in the type-matching collection: Pictures for images, Documents
+  /// for PDFs …) and writes the decrypted bytes where the user picks. The
+  /// vault copy always stays encrypted in place. Returns the chosen path or
+  /// null on cancel.
+  Future<String?> saveItemBack(String id, String fileName) async {
+    state = state.copyWith(busy: true, lastError: null);
+    try {
+      final ext = fileName.contains('.')
+          ? fileName.split('.').last.toLowerCase()
+          : '';
+      final bytes = await store.plainBytesOf(id);
+      final picked = await FilePicker.platform.saveFile(
+        fileName: fileName,
+        type: switch (ext) {
+          'jpg' || 'jpeg' || 'png' || 'webp' || 'heic' || 'gif' => FileType.image,
+          'mp4' || 'mov' || 'avi' || 'mkv' => FileType.video,
+          'mp3' || 'm4a' || 'wav' || 'aac' || 'flac' => FileType.audio,
+          _ => FileType.any,
+        },
+        // SAF needs raw bytes when no initialDirectory applies.
+        bytes: bytes,
+      );
+      return picked;
+    } catch (e) {
+      state = state.copyWith(lastError: e.toString());
+      return null;
+    } finally {
+      state = state.copyWith(busy: false);
+    }
+  }
+
+  /// Wipes decrypted view files (session end). Called on hard lock.
+  Future<void> _wipeViews() async {
+    try {
+      final docs = await appDocumentsPath();
+      store.wipeViews('$docs${Platform.pathSeparator}vault_views');
+    } catch (_) {
+      // Best effort.
+    }
+  }
+
   Future<void> remove(String id) async {
     state = state.copyWith(busy: true, lastError: null);
     try {
@@ -347,6 +414,7 @@ class VaultSession extends Notifier<VaultSessionState> {
         return false;
       }
       _biometricsUsable = false;
+      await _wipeViews();
       state = const VaultSessionState(phase: VaultPhase.uninitialized);
       return true;
     } catch (e) {

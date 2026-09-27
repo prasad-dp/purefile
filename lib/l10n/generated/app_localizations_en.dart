@@ -48,6 +48,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsTitle => 'Settings';
 
   @override
+  String get appearanceSection => 'Appearance';
+
+  @override
+  String get appearanceMode => 'Theme mode';
+
+  @override
+  String get appearanceModeBody => 'Choose automatic, light, or dark';
+
+  @override
+  String get appearanceAuto => 'Auto';
+
+  @override
+  String get appearanceLight => 'Light';
+
+  @override
+  String get appearanceDark => 'Dark';
+
+  @override
+  String get themeTooltipAutoLight => 'Automatic (day mode) — tap for dark';
+
+  @override
+  String get themeTooltipAutoDark => 'Automatic (night mode) — tap for light';
+
+  @override
+  String get themeTooltipLight => 'Light theme — tap for dark';
+
+  @override
+  String get themeTooltipDark => 'Dark theme — tap for light';
+
+  @override
   String get privacyDashboard => 'Privacy dashboard';
 
   @override
@@ -303,6 +333,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get vaultExport => 'Export copy';
+
+  @override
+  String get vaultSaveBack => 'Save to device…';
 
   @override
   String vaultExportDone(String name) {

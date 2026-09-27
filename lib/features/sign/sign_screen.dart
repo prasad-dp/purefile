@@ -11,6 +11,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../../core/history/history_store.dart';
 import '../../core/pdf/pdf_stamp_service.dart';
+import '../../core/theme.dart';
 
 /// Feature 13: Signature & Stamp — dedicated interactive flow (like the
 /// scanner): pick a PDF, draw a signature (or import a stamp image), choose
@@ -170,14 +171,20 @@ class _SignScreenState extends ConsumerState<SignScreen> {
       final docs = await getApplicationDocumentsDirectory();
       final outputs = '${docs.path}${Platform.pathSeparator}outputs';
       Directory(outputs).createSync(recursive: true);
+      // ISOLATE-SAFETY: read State fields into locals BEFORE the closure —
+      // a closure that reads `this.*` captures the whole State (element tree)
+      // and Isolate.run rejects it as unsendable on device.
+      final page = _page;
+      final anchor = _anchor;
+      final scalePercent = _scalePercent;
       final result = await Isolate.run(() => stampTask(StampArgs(
             inputPath: pdf,
             outputDir: outputs,
             stampBytes: stamp,
-            pageNumber: _page,
-            anchor: _anchor,
+            pageNumber: page,
+            anchor: anchor,
             marginPt: 24,
-            scalePercent: _scalePercent,
+            scalePercent: scalePercent,
           )));
       try {
         await ref.read(historyProvider).record(HistoryEntry(
@@ -273,7 +280,7 @@ class _SignScreenState extends ConsumerState<SignScreen> {
                 height: 160,
                 decoration: BoxDecoration(
                   color: _padColor,
-                  border: Border.all(color: Colors.black12),
+                  border: Border.all(color: PfColors.hairline(Theme.of(context).brightness == Brightness.dark)),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: CustomPaint(
@@ -307,7 +314,7 @@ class _SignScreenState extends ConsumerState<SignScreen> {
               width: 120,
               height: 56,
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.black12),
+                border: Border.all(color: PfColors.hairline(Theme.of(context).brightness == Brightness.dark)),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: stamp == null

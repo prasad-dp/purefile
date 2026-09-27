@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../core/tools.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../widgets/hero_header.dart';
+import '../../widgets/theme_toggle.dart';
 import '../../widgets/tool_card.dart';
 
 /// Home: gradient hero, iOS-style search, category-sectioned tool grid.
@@ -40,6 +41,10 @@ class _HomeScreenState extends State<HomeScreen> {
         slivers: [
           SliverHeroHeader(
             title: loc.appName,
+            leading: ThemeToggleIcon(
+              color: Colors.white,
+              background: Colors.white.withValues(alpha: 0.16),
+            ),
             actions: [
               HeroAction(
                 icon: Icons.history_rounded,

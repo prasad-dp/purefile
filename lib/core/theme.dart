@@ -44,6 +44,17 @@ abstract final class PfColors {
   static const Color separatorLight = Color(0x1F000000);
   static const Color separatorDark = Color(0x33FFFFFF);
 
+  /// Hairlines that must stay visible on BOTH card fills — 12% black reads on
+  /// white cards in light mode, 25% white reads on #1C1C1E in dark mode.
+  /// (The separator constants above are tuned for the grouped background and
+  /// disappear on white — use these for content drawn on cards, e.g. the
+  /// signature pad and stamp previews.)
+  static const Color hairlineLight = Color(0x1F000000);
+  static const Color hairlineDark = Color(0x40FFFFFF);
+
+  static Color hairline(bool isDark) =>
+      isDark ? hairlineDark : hairlineLight;
+
   /// The signature brand gradient — teal → sky.
   static LinearGradient get heroGradient => const LinearGradient(
         begin: Alignment.topLeft,
@@ -133,13 +144,16 @@ abstract final class PfTheme {
           isLight ? PfColors.surfaceLight : PfColors.surfaceDark,
       textTheme: _pfTextScheme(isLight),
       cardTheme: CardThemeData(
-        elevation: 0,
         margin: EdgeInsets.zero,
         color: isLight ? PfColors.cardLight : PfColors.cardDark,
         shape: RoundedRectangleBorder(borderRadius: radius),
-        // iOS cards float by light, not by border hairlines — a whisper of
-        // shadow only in light mode (dark cards read via their fill).
+        // Light-mode cards must separate from the #F2F2F7 grouped background
+        // by LIGHT (the iOS way), not hairlines: elevation 1 gives every card
+        // the theme's whisper shadow; surfaceTint stays transparent so M3
+        // tinting can't gray the white fill. Dark cards read via their fill.
+        elevation: isLight ? 1 : 0,
         shadowColor: Colors.black.withValues(alpha: isLight ? 0.06 : 0.0),
+        surfaceTintColor: Colors.transparent,
       ),
       dividerTheme: DividerThemeData(
         color: PfColors.separator(isLight),
