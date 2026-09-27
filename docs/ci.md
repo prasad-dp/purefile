@@ -1,27 +1,27 @@
 # CI — Android APK builds
 
-`.github/workflows/android.yml` builds a **release APK on every push/PR**
-(and on demand via *Run workflow*), so you can sideload and test locally.
+`.github/workflows/android.yml` builds a **single universal release APK**
+(on demand via *Run workflow*), so you can sideload and test on any Android device.
+
+A separate workflow `.github/workflows/android-split.yml` is available if
+per-architecture split APKs (arm64, arm32, x86_64) are needed.
 
 ## What it runs, in order
 
 1. `flutter pub get` + `flutter gen-l10n`
 2. `flutter analyze` — fails the build on any issue
-3. `flutter test` — the full 243-test suite
+3. `flutter test` — the test suite
 4. `tool/egress_check.sh` — source-level network-egress scan
-5. `flutter build apk --release --split-per-abi`
+5. `flutter build apk --release` (single universal APK)
 6. **Offline guarantee gate**: greps the merged release manifest for
    `INTERNET` — fails the workflow if a dependency ever sneaks it back in
-7. Uploads three artifacts
+7. Uploads single artifact: `purefile-release-apk` (`app-release.apk`)
 
 ## Getting the APK onto your phone
 
 1. Open the repo on GitHub → **Actions** → latest *Android APK* run
-2. Scroll to **Artifacts** → download:
-   - `purefile-arm64-apk` — every modern phone (use this one)
-   - `purefile-arm32-apk` — older 32-bit devices
-   - `purefile-x86_64-apk` — emulators and ChromeOS
-3. Unzip, copy the `.apk` to the phone, open it, allow "install unknown
+2. Scroll to **Artifacts** → download `purefile-release-apk`
+3. Unzip, copy `app-release.apk` to your phone, open it, and allow "install unknown
    apps" when prompted.
 
 Artifacts are kept per-run; retention follows your repo's default (90 days).
