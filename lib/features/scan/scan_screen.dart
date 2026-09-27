@@ -318,7 +318,7 @@ class _ScanPageItem {
 }
 
 /// Top-level isolate runner for single scan page image processing.
-Future<ProcessedPage> runScanPageInIsolate(Uint8List bytes) {
+Future<ScanPage> runScanPageInIsolate(Uint8List bytes) {
   return Isolate.run(() => processScanPage(bytes));
 }
 

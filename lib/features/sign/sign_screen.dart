@@ -176,6 +176,7 @@ class _SignScreenState extends ConsumerState<SignScreen> {
       // and Isolate.run rejects it as unsendable on device.
       final page = _page;
       final anchor = _anchor;
+      final scalePercent = _scalePercent;
       final args = StampArgs(
         inputPath: pdf,
         outputDir: outputs,
