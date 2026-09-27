@@ -127,7 +127,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   }
 
   Future<void> _addProcessed(Uint8List bytes) async {
-    final page = await Isolate.run(() => processScanPage(bytes));
+    final page = await runScanPageInIsolate(bytes);
     final dir = await getApplicationDocumentsDirectory();
     final sessionDir =
         '${dir.path}${Platform.pathSeparator}scan_session';
@@ -156,7 +156,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
         ],
         outputDir: outputs,
       );
-      final result = await Isolate.run(() => imagesToPdfTask(args));
+      final result = await runScanImagesToPdfInIsolate(args);
       final name = result.outputPath.split(Platform.pathSeparator).last;
       try {
         await ref.read(historyProvider).record(HistoryEntry(
@@ -315,4 +315,14 @@ class _ScanPageItem {
   final String path;
   final int width;
   final int height;
+}
+
+/// Top-level isolate runner for single scan page image processing.
+Future<ProcessedPage> runScanPageInIsolate(Uint8List bytes) {
+  return Isolate.run(() => processScanPage(bytes));
+}
+
+/// Top-level isolate runner for scan images to PDF generation.
+Future<ImagesToPdfResult> runScanImagesToPdfInIsolate(ImagesToPdfArgs args) {
+  return Isolate.run(() => imagesToPdfTask(args));
 }

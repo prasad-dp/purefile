@@ -85,5 +85,24 @@ void main() {
       final out = await handle.future;
       expect(out, data);
     });
+
+    test('delivers result with entry and args without closures', () async {
+      Future<int> multiply(dynamic val, PfJobContext ctx) async => (val as int) * 2;
+
+      final handle = runJob<int>(entry: multiply, args: 21);
+      final result = await handle.future;
+      expect(result, 42);
+    });
+
+    test('entry reports progress and cooperative cancel with args', () async {
+      Future<String> worker(dynamic prefix, PfJobContext ctx) async {
+        ctx.report(0.5, 'half');
+        return '${prefix as String} done';
+      }
+
+      final handle = runJob<String>(entry: worker, args: 'job');
+      final result = await handle.future;
+      expect(result, 'job done');
+    });
   });
 }

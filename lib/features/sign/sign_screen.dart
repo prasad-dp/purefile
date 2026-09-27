@@ -176,16 +176,16 @@ class _SignScreenState extends ConsumerState<SignScreen> {
       // and Isolate.run rejects it as unsendable on device.
       final page = _page;
       final anchor = _anchor;
-      final scalePercent = _scalePercent;
-      final result = await Isolate.run(() => stampTask(StampArgs(
-            inputPath: pdf,
-            outputDir: outputs,
-            stampBytes: stamp,
-            pageNumber: page,
-            anchor: anchor,
-            marginPt: 24,
-            scalePercent: scalePercent,
-          )));
+      final args = StampArgs(
+        inputPath: pdf,
+        outputDir: outputs,
+        stampBytes: stamp,
+        pageNumber: page,
+        anchor: anchor,
+        marginPt: 24,
+        scalePercent: scalePercent,
+      );
+      final result = await runStampInIsolate(args);
       try {
         await ref.read(historyProvider).record(HistoryEntry(
               path: result.outputPath,
@@ -461,4 +461,10 @@ class _SignaturePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SignaturePainter oldDelegate) =>
       oldDelegate.strokes != strokes;
+}
+
+/// Top-level isolate runner to guarantee the closure captures ONLY [args]
+/// and never the enclosing State or widget element tree.
+Future<StampResult> runStampInIsolate(StampArgs args) {
+  return Isolate.run(() => stampTask(args));
 }

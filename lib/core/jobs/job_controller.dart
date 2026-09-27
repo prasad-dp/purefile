@@ -319,12 +319,13 @@ class JobFlowController extends Notifier<JobFlowState> {
 
   /// F2 (batch caps + storage) then F4 (isolate run) with per-tool args.
   ///
-  /// ISOLATE-SAFETY RULE: the task closure passed to runJob must capture ONLY
-  /// sendable data (the args object) and TOP-LEVEL functions. An instance
-  /// tear-off (e.g. `_runTool`) captures `this` — and through the Riverpod
-  /// ref/container the watched ELEMENT tree — making it unsendable:
-  /// Isolate.spawn throws "object is unsendable" on device at the very first
-  /// Start tap (host tests without a widget tree never reproduce it).
+  /// ISOLATE-SAFETY RULE: pass top-level function `runToolTask` as [entry] and
+  /// the pure [args] object directly to [runJob]. NEVER construct a lambda/closure
+  /// inside an instance method (e.g. `(ctx) => runToolTask(args, ctx)`); in Dart,
+  /// any closure created inside an instance method captures that method's context
+  /// frame (`this`, `_AsyncCompleter`, Riverpod ref), which transitively drags
+  /// watched widget elements (RenderParagraph, PipelineOwner, WidgetsFlutterBinding)
+  /// into the isolate and causes "object is unsendable" at Start.
   Future<void> start({ToolArgsBuilder? makeArgs, String? toolId}) async {
     final current = state;
     if (current is! JobReady) return;
@@ -344,7 +345,8 @@ class JobFlowController extends Notifier<JobFlowState> {
 
       state = const JobRunning(fraction: 0);
       _handle = runner.runJob<Object?>(
-        task: (ctx) => runToolTask(args, ctx), // top-level — captures only args
+        entry: runToolTask,
+        args: args,
       );
 
       _handle!.events.listen((event) {

@@ -137,11 +137,16 @@ class _ToolFlowScreenState extends ConsumerState<ToolFlowScreen> {
                   // inside a tap callback — it threw when Start was tapped.
                   // Options are already live via the build's watch above;
                   // read() here is the legal one-shot lookup.
-                  options: tool.id == 'pdf_compress'
-                      ? ref.read(pdfCompressQualityProvider)
-                      : tool.id == 'pdf_split'
-                          ? ref.read(splitOptionsProvider)
-                          : null,
+                  options: switch (tool.id) {
+                    'pdf_compress' => ref.read(pdfCompressQualityProvider),
+                    'pdf_split' => ref.read(splitOptionsProvider),
+                    'images_to_pdf' => ref.read(imagesToPdfFitProvider),
+                    'pdf_to_images' => ref.read(pdfToImagesOptionsProvider),
+                    'image_compress' => ref.read(imageCompressOptionsProvider),
+                    'image_convert' => ref.read(imageConvertTargetProvider),
+                    'ocr' => ref.read(ocrOptionsProvider),
+                    _ => null,
+                  },
                 ),
               ),
               // BUGFIX (add-more replaced the selection): append via

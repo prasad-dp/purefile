@@ -118,7 +118,7 @@ class VaultStore {
     final vaultKey = VaultCrypto.newVaultKey();
     // PERFORMANCE: PBKDF2 (150k iterations) is CPU-heavy — derive+wrap on a
     // worker isolate so the UI never freezes during setup.
-    final wrapped = await Isolate.run(() => VaultCrypto.wrapKey(secret, vaultKey));
+    final wrapped = await _wrapKeyWorker(secret, vaultKey);
     await _keyStorage.write(_wrappedKeyStorageKey, base64Encode(wrapped));
     _key = vaultKey;
     await _writeManifest(const []);
@@ -135,8 +135,7 @@ class VaultStore {
     try {
       // PERFORMANCE: the PBKDF2 derivation inside unwrapKey runs on a worker
       // isolate — unlock must never freeze the UI for ~a second.
-      _key = await Isolate.run(
-          () => VaultCrypto.unwrapKey(secret, Uint8List.fromList(blob)));
+      _key = await _unwrapKeyWorker(secret, Uint8List.fromList(blob));
     } on ArgumentError {
       return false;
     }
@@ -192,10 +191,7 @@ class VaultStore {
     // PERFORMANCE: AES over the whole file + the 3-pass secure delete of the
     // original are CPU/IO-heavy — both run on a worker isolate. The closure
     // captures only sendable values (bytes/path/key), never `this`.
-    await Isolate.run(() async {
-      final c = await VaultCrypto.encrypt(key, plain);
-      await atomicWriteBytes(blobPath, c);
-    });
+    await _encryptAndWriteWorker(key, plain, blobPath);
     final item = VaultItem(
       id: id,
       name: name,
@@ -204,7 +200,7 @@ class VaultStore {
     );
     await _writeManifest([...await loadItems(), item]);
     try {
-      await Isolate.run(() => secureDelete(sourcePath));
+      await _secureDeleteWorker(sourcePath);
     } catch (_) {
       // Best effort: the copy is safely encrypted; a leftover original can be
       // removed by the user. Never mask a successful import over this.
@@ -224,7 +220,7 @@ class VaultStore {
     final blob = _blobFile(id).readAsBytesSync();
     // PERFORMANCE: decrypt runs on a worker isolate (closure captures only
     // sendable bytes/key — never `this`).
-    final plain = await Isolate.run(() => VaultCrypto.decrypt(key, blob));
+    final plain = await _decryptWorker(key, blob);
     final target = uniqueDestination(outputDir, item.name);
     await atomicWriteBytes(target, plain);
     return target;
@@ -243,7 +239,7 @@ class VaultStore {
     }
     if (item == null) throw StateError('unknown vault item');
     final blob = _blobFile(id).readAsBytesSync();
-    final plain = await Isolate.run(() => VaultCrypto.decrypt(key, blob));
+    final plain = await _decryptWorker(key, blob);
     Directory(viewsDir).createSync(recursive: true);
     final target = uniqueDestination(viewsDir, item.name);
     await atomicWriteBytes(target, plain);
@@ -257,7 +253,7 @@ class VaultStore {
     final exists = (await loadItems()).any((e) => e.id == id);
     if (!exists) throw StateError('unknown vault item');
     final blob = _blobFile(id).readAsBytesSync();
-    return Isolate.run(() => VaultCrypto.decrypt(key, blob));
+    return _decryptWorker(key, blob);
   }
 
   /// Wipes every decrypted view file (called on hard lock / destroy — the
@@ -314,3 +310,22 @@ class VaultStore {
     return [for (final b in bytes) b.toRadixString(16).padLeft(2, '0')].join();
   }
 }
+
+Future<Uint8List> _wrapKeyWorker(String secret, Uint8List vaultKey) =>
+    Isolate.run(() => VaultCrypto.wrapKey(secret, vaultKey));
+
+Future<Uint8List> _unwrapKeyWorker(String secret, Uint8List blob) =>
+    Isolate.run(() => VaultCrypto.unwrapKey(secret, blob));
+
+Future<void> _encryptAndWriteWorker(
+        Uint8List key, Uint8List plain, String blobPath) =>
+    Isolate.run(() async {
+      final c = await VaultCrypto.encrypt(key, plain);
+      await atomicWriteBytes(blobPath, c);
+    });
+
+Future<void> _secureDeleteWorker(String sourcePath) =>
+    Isolate.run(() => secureDelete(sourcePath));
+
+Future<Uint8List> _decryptWorker(Uint8List key, Uint8List blob) =>
+    Isolate.run(() => VaultCrypto.decrypt(key, blob));

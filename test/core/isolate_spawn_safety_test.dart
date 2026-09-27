@@ -27,7 +27,8 @@ void main() {
       );
 
       final handle = runner.runJob<Object?>(
-        task: (ctx) => runToolTask(args, ctx),
+        entry: runToolTask,
+        args: args,
       );
       final result = await handle.future;
       expect(result, isA<CopyThroughResult>());
