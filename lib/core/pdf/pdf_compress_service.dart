@@ -215,11 +215,11 @@ Future<Uint8List?> _rasterPass(
   final src = await pdfx.PdfDocument.openData(data);
   try {
     final pageCount = src.pagesCount;
-    if (pageCount == 0) return null;
+    if (pageCount == 0 || pageCount > args.imageThresholdPages) return null;
 
     // Image-heavy documents (typical: scans) benefit most from rasterization.
-    // For text-heavy PDFs the raster pass usually loses — skip it when the
-    // structural pass already won and the page count is high.
+    // For documents exceeding imageThresholdPages, the raster pass is skipped
+    // to preserve memory safety.
     final built = PdfDocument();
     try {
       built.fileStructure.incrementalUpdate = false;

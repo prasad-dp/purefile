@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 
 import 'scan_processing.dart';
+export 'scan_processing.dart' show ScanFilter;
 
 /// One processed scan page: encoded JPEG bytes + pixel dimensions.
 final class ScanPage {
@@ -19,7 +20,7 @@ final class ScanPage {
 /// 2. downscale so the longest side is [maxSide] (memory + speed bound)
 /// 3. best-effort auto-crop: detect the document quad and perspective-warp it
 ///    to a rectangle; when detection is not confident the full frame is kept
-/// 4. shadow-clean enhancement (paper → white, ink → dark)
+/// 4. filter theme (enhanced clean, original, grayscale, monochrome)
 /// 5. JPEG encode at [quality]
 ///
 /// Pure CPU — safe to run inside `Isolate.run` from the capture UI.
@@ -28,6 +29,7 @@ ScanPage processScanPage(
   bool autoCrop = true,
   int maxSide = 2200,
   int quality = 90,
+  ScanFilter filter = ScanFilter.enhanced,
 }) {
   img.Image? decoded;
   try {
@@ -69,7 +71,12 @@ ScanPage processScanPage(
     }
   }
 
-  image = enhanceDocument(image);
+  image = switch (filter) {
+    ScanFilter.enhanced => enhanceDocument(image),
+    ScanFilter.original => image,
+    ScanFilter.grayscale => img.grayscale(image),
+    ScanFilter.monochrome => applyMonochrome(image),
+  };
 
   final jpeg = img.encodeJpg(image, quality: quality);
   return ScanPage(

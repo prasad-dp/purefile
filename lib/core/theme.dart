@@ -83,6 +83,7 @@ abstract final class PfHaptics {
   static void tap() => _safe(() => HapticFeedback.selectionClick());
   static void success() => _safe(() => HapticFeedback.mediumImpact());
   static void warning() => _safe(() => HapticFeedback.heavyImpact());
+  static void heavy() => _safe(() => HapticFeedback.heavyImpact());
 
   static void _safe(VoidCallback fn) {
     try {

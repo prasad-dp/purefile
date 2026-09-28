@@ -222,6 +222,19 @@ void main() {
         throwsA(isA<ScanPageException>()));
   });
 
+  test('processScanPage supports all ScanFilter modes', () {
+    final im = img.Image(width: 100, height: 100, numChannels: 3);
+    img.fill(im, color: img.ColorRgb8(100, 150, 200));
+    final bytes = Uint8List.fromList(img.encodeJpg(im));
+
+    for (final filter in ScanFilter.values) {
+      final page = processScanPage(bytes, autoCrop: false, filter: filter);
+      expect(page.bytes.isNotEmpty, isTrue);
+      expect(page.width, 100);
+      expect(page.height, 100);
+    }
+  });
+
   // ------------------------------------------------------------ ScanSession
 
   test('ScanSession pages land on disk in order and discard cleans up', () {

@@ -126,6 +126,29 @@ Future<PdfToImagesResult> pdfToImagesTask(
   }
 
   final stem = _stemOf(name);
+  if (wanted.length == 1) {
+    if (isCancelled?.call() ?? false) throw const JobCancelled();
+    final pageNo = wanted.single;
+    onProgress?.call(0.5, 'Page $pageNo');
+
+    final (wPt, hPt) = pageSizes[pageNo - 1];
+    final scale = args.dpi / 72.0;
+    final widthPx = (wPt * scale).round().clamp(1, 4096);
+    final heightPx = (hPt * scale).round().clamp(1, 4096);
+
+    final (_, _, bytes) = await renderer(args.inputPath, pageNo, widthPx, heightPx, args.format, args.dpi);
+    final ext = args.format == PdfToImagesFormat.png ? 'png' : 'jpg';
+    final target = uniqueDestination(args.outputDir, '$stem p$pageNo.$ext');
+    await atomicWriteBytes(target, bytes);
+    onProgress?.call(1.0, null);
+    return PdfToImagesResult(
+      outputPath: target,
+      outputBytes: bytes.length,
+      imageCount: 1,
+      pageCountTotal: pageCount,
+    );
+  }
+
   final images = <(String, Uint8List)>[];
   for (var i = 0; i < wanted.length; i++) {
     if (isCancelled?.call() ?? false) throw const JobCancelled();
@@ -140,18 +163,6 @@ Future<PdfToImagesResult> pdfToImagesTask(
     final (_, _, bytes) = await renderer(args.inputPath, pageNo, widthPx, heightPx, args.format, args.dpi);
     final ext = args.format == PdfToImagesFormat.png ? 'png' : 'jpg';
     images.add(('$stem p$pageNo.$ext', bytes));
-  }
-
-  if (images.length == 1) {
-    final (fileName, data) = images.single;
-    final target = uniqueDestination(args.outputDir, fileName);
-    await atomicWriteBytes(target, data);
-    return PdfToImagesResult(
-      outputPath: target,
-      outputBytes: data.length,
-      imageCount: 1,
-      pageCountTotal: pageCount,
-    );
   }
 
   onProgress?.call(wanted.length / wanted.length, 'Packing zip');

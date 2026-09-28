@@ -58,6 +58,7 @@ final class OcrArgs {
     required this.inputPath,
     required this.outputDir,
     this.pages = const [],
+    this.script = 'latin',
   });
 
   final String inputPath;
@@ -65,6 +66,9 @@ final class OcrArgs {
 
   /// 1-based page selection; empty = all pages.
   final List<int> pages;
+
+  /// Recognition script ('latin', 'chinese', 'devanagari', 'japanese', 'korean').
+  final String script;
 }
 
 /// OCR pipeline:

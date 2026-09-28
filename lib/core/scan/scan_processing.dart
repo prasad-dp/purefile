@@ -205,6 +205,35 @@ img.Image enhanceDocument(
   return out;
 }
 
+/// Filter theme presets for scanned documents (Adobe Scan style).
+enum ScanFilter {
+  /// Clean document with shadow lifting and paper whitening.
+  enhanced,
+
+  /// Preserves natural photo colors after perspective deskewing.
+  original,
+
+  /// Smooth continuous-tone grayscale.
+  grayscale,
+
+  /// Crisp high-contrast black & white for printable text.
+  monochrome,
+}
+
+/// High-contrast binary monochrome for sharp printed text.
+img.Image applyMonochrome(img.Image src, {int threshold = 140}) {
+  final gray = img.grayscale(src);
+  final out = img.Image(width: gray.width, height: gray.height, numChannels: 3);
+  for (var y = 0; y < gray.height; y++) {
+    for (var x = 0; x < gray.width; x++) {
+      final lum = gray.getPixel(x, y).luminance;
+      final v = lum >= threshold ? 255 : 0;
+      out.setPixelRgba(x, y, v, v, v, 255);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Homography from unit square to arbitrary quad (projective mapping).
 // ---------------------------------------------------------------------------

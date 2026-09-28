@@ -11,7 +11,18 @@ import '../pdf/ocr_service.dart';
 /// Device [PageRecognizer] backed by ML Kit with bundled models (no Play
 /// Services model downloads — models ship inside the APK, see
 /// android/app/build.gradle.kts). Latin/CJK/Devanagari.
-PageRecognizer mlkitPageRecognizer({TextRecognitionScript script = TextRecognitionScript.latin}) {
+PageRecognizer mlkitPageRecognizer({
+  TextRecognitionScript? script,
+  String? scriptName,
+}) {
+  final resolvedScript = script ??
+      switch (scriptName?.toLowerCase()) {
+        'chinese' => TextRecognitionScript.chinese,
+        'devanagari' || 'devanagiri' => TextRecognitionScript.devanagiri,
+        'japanese' => TextRecognitionScript.japanese,
+        'korean' => TextRecognitionScript.korean,
+        _ => TextRecognitionScript.latin,
+      };
   return (Uint8List pageImageBytes) async {
     // InputImage needs a path — stage the rendered PNG in a temp file.
     final tmp = File(
@@ -19,7 +30,7 @@ PageRecognizer mlkitPageRecognizer({TextRecognitionScript script = TextRecogniti
     try {
       await tmp.writeAsBytes(pageImageBytes, flush: true);
       final inputImage = InputImage.fromFilePath(tmp.path);
-      final recognizer = TextRecognizer(script: script);
+      final recognizer = TextRecognizer(script: resolvedScript);
       try {
         final result = await recognizer.processImage(inputImage);
         return [

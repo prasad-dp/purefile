@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
@@ -366,6 +368,7 @@ Object? makeToolArgs({
       inputPath: file.path,
       outputDir: outputDir,
       pages: opts.pages, // empty = all pages (service contract)
+      script: opts.script,
     );
   }
   if (tool.id == 'images_to_pdf') {
@@ -578,11 +581,24 @@ class PdfToImagesOptions extends ConsumerWidget {
   }
 }
 
-class OcrOptions extends ConsumerWidget {
+class OcrOptions extends ConsumerStatefulWidget {
   const OcrOptions({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<OcrOptions> createState() => _OcrOptionsState();
+}
+
+class _OcrOptionsState extends ConsumerState<OcrOptions> {
+  static const _scripts = [
+    ('latin', 'Latin (English, French, Spanish, etc.)'),
+    ('devanagari', 'Devanagari (हिन्दी / Sanskrit)'),
+    ('chinese', 'Chinese (中文)'),
+    ('japanese', 'Japanese (日本語)'),
+    ('korean', 'Korean (한국어)'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
     final options = ref.watch(ocrOptionsProvider);
     return Card(
@@ -591,6 +607,24 @@ class OcrOptions extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            DropdownButtonFormField<String>(
+              initialValue: options.script,
+              decoration: const InputDecoration(
+                labelText: 'Script / Language',
+              ),
+              items: [
+                for (final (id, label) in _scripts)
+                  DropdownMenuItem(value: id, child: Text(label)),
+              ],
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() {
+                    options.script = val;
+                  });
+                }
+              },
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: options.pagesController,
               decoration: InputDecoration(
@@ -986,16 +1020,154 @@ class _RunningStage extends StatelessWidget {
   }
 }
 
-class _DoneStage extends StatelessWidget {
+enum _OutputAction { saveAs, rename }
+
+class _DoneStage extends StatefulWidget {
   const _DoneStage({required this.outputs});
 
   final List<OutputInfo> outputs;
 
   @override
+  State<_DoneStage> createState() => _DoneStageState();
+}
+
+class _DoneStageState extends State<_DoneStage> {
+  late List<OutputInfo> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List<OutputInfo>.from(widget.outputs);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DoneStage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.outputs != widget.outputs) {
+      _items = List<OutputInfo>.from(widget.outputs);
+    }
+  }
+
+  Future<void> _saveToDevice(OutputInfo output) async {
+    final file = File(output.path);
+    if (!file.existsSync()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File not found on device')),
+      );
+      return;
+    }
+
+    try {
+      final bytes = await file.readAsBytes();
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save to Device',
+        fileName: output.name,
+        type: FileType.any,
+        bytes: bytes,
+      );
+
+      if (savePath != null) {
+        final targetFile = File(savePath);
+        if (!targetFile.existsSync() || targetFile.lengthSync() == 0) {
+          await file.copy(savePath);
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved to: ${savePath.split(Platform.pathSeparator).last}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Save error: $e')),
+      );
+    }
+  }
+
+  Future<void> _renameOutput(OutputInfo output) async {
+    final controller = TextEditingController(text: output.name);
+    final formKey = GlobalKey<FormState>();
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename File'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'New name',
+              hintText: 'Enter new file name',
+            ),
+            validator: (val) {
+              if (val == null || val.trim().isEmpty) return 'Name cannot be empty';
+              if (RegExp(r'[\\/:*?"<>|\x00-\x1f]').hasMatch(val)) {
+                return 'Invalid characters in name';
+              }
+              return null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.of(ctx).pop(controller.text.trim());
+              }
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.trim().isNotEmpty && newName.trim() != output.name) {
+      final cleanName = newName.trim();
+      final oldFile = File(output.path);
+      if (!oldFile.existsSync()) return;
+
+      final dir = oldFile.parent.path;
+      final uniquePath = uniqueDestination(dir, cleanName);
+      try {
+        final renamedFile = await oldFile.rename(uniquePath);
+        final actualNewName = renamedFile.path.split(Platform.pathSeparator).last;
+        setState(() {
+          final idx = _items.indexOf(output);
+          if (idx != -1) {
+            _items[idx] = OutputInfo(
+              path: renamedFile.path,
+              name: actualNewName,
+              sizeBytes: output.sizeBytes,
+              savedPercent: output.savedPercent,
+              keptOriginal: output.keptOriginal,
+              warning: output.warning,
+            );
+          }
+        });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Renamed to $actualNewName')),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Rename failed: $e')),
+        );
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    // F19: success is felt, not just seen (harmless where no haptics exist).
     PfHaptics.success();
 
     return ListView(
@@ -1004,11 +1176,11 @@ class _DoneStage extends StatelessWidget {
         Icon(Icons.check_circle_rounded, color: scheme.primary, size: 56),
         const SizedBox(height: 8),
         Text(
-          loc.doneTitle(outputs.length),
+          loc.doneTitle(_items.length),
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleLarge,
         ),
-        for (final output in outputs) ...[
+        for (final output in _items) ...[
           if (output.savedPercent > 0)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -1047,7 +1219,7 @@ class _DoneStage extends StatelessWidget {
             ),
         ],
         const SizedBox(height: 16),
-        for (final output in outputs)
+        for (final output in _items)
           Card(
             child: ListTile(
               leading: const Icon(Icons.insert_drive_file_rounded),
@@ -1069,6 +1241,40 @@ class _DoneStage extends StatelessWidget {
                     tooltip: loc.open,
                     icon: const Icon(Icons.open_in_new_rounded),
                     onPressed: () => OpenFilex.open(output.path),
+                  ),
+                  PopupMenuButton<_OutputAction>(
+                    icon: const Icon(Icons.more_vert_rounded),
+                    tooltip: 'More actions',
+                    onSelected: (action) {
+                      switch (action) {
+                        case _OutputAction.saveAs:
+                          _saveToDevice(output);
+                        case _OutputAction.rename:
+                          _renameOutput(output);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: _OutputAction.saveAs,
+                        child: Row(
+                          children: [
+                            Icon(Icons.download_rounded, size: 20),
+                            SizedBox(width: 10),
+                            Text('Save to Device'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: _OutputAction.rename,
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit_rounded, size: 20),
+                            SizedBox(width: 10),
+                            Text('Rename'),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

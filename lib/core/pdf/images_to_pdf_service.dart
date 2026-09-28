@@ -24,12 +24,14 @@ final class ImagesToPdfArgs {
     required this.images,
     required this.outputDir,
     this.fit = ImageFit.imageSize,
+    this.outputFileName,
   });
 
   /// Ordered images (user-reorderable) as (path, name).
   final List<(String path, String name)> images;
   final String outputDir;
   final ImageFit fit;
+  final String? outputFileName;
 }
 
 final class ImagesToPdfResult {
@@ -101,8 +103,13 @@ Future<ImagesToPdfResult> imagesToPdfTask(
 
     onProgress?.call(0.95, 'Saving');
     final stem = _stemOf(args.images.first.$2);
-    final fileName = pages == 1 ? '$stem.pdf' : '${stem}_plus${pages - 1}.pdf';
-    final target = uniqueDestination(args.outputDir, fileName);
+    final defaultName = pages == 1 ? '$stem.pdf' : '${stem}_plus${pages - 1}.pdf';
+    final targetName = (args.outputFileName != null && args.outputFileName!.trim().isNotEmpty)
+        ? (args.outputFileName!.trim().toLowerCase().endsWith('.pdf')
+            ? args.outputFileName!.trim()
+            : '${args.outputFileName!.trim()}.pdf')
+        : defaultName;
+    final target = uniqueDestination(args.outputDir, targetName);
     final bytes = Uint8List.fromList(await built.save());
     await atomicWriteBytes(target, bytes);
     return ImagesToPdfResult(

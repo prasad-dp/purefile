@@ -92,6 +92,8 @@ release build has no INTERNET permission, so the OS itself forbids it.
 | 3.14 | Light-mode card separation | In LIGHT mode every card (home tools, settings groups, history rows, tool flow) floats on the gray background with a visible whisper shadow — no flat white-on-gray blending |
 | 3.15 | Sign pad in dark mode | Sign & Stamp: the drawing canvas stays WHITE with a visible border in both modes (white background is intentional — export requires it); strokes clearly visible |
 | 3.16 | Dark-mode sweep | Toggle through all screens (home, tools, vault, history, settings, privacy, crash log, onboarding): no white flashes, no invisible borders/text, hairlines visible on cards |
+| 3.17 | Quick Access (Pinned Tools) | Long-press any tool card or tap gold star badge to pin/unpin; pinned tools render in "Quick Access" grid at the top of Home; persists across restarts |
+| 3.18 | Storage & Cache Cleaner | Settings → Storage & Cache shows live sizes of temporary cache and saved outputs; "Clean" safely wipes temporary buffers without touching vault or saved outputs; "Clear" on outputs prompts confirmation |
 
 ---
 
@@ -192,45 +194,40 @@ flow: **pick → options → progress (cancellable) → result (open/share)**.
 | 4.9.5 | Empty zip | Typed error, no empty folder left |
 | 4.9.6 | Extract the same zip twice | Second output folder gets a unique name, no silent overwrite |
 | 4.9.7 | Nested zip inside the zip | Extracts fine; the inner zip can be extracted in a second pass |
+| 4.9.8 | Multi-file archive extraction | All extracted files render in a scrollable list view with individual Open, Share, and 3-dots (Save to Device, Rename) actions |
 
-### 4.10 Document Scanner (`scan`) — needs a real camera
-
-| # | Script | Expected |
-| --- | --- | --- |
-| 4.10.1 | Photograph a document on a desk | Auto-crop trims to the page, shadows lifted, paper white, ink dark |
-| 4.10.2 | Photograph a dark/blurry scene | Detection degrades gracefully — full frame kept, never a crash |
-| 4.10.3 | Multi-page: 3 shots, reorder, delete one | Thumbnails reorderable; final PDF has the kept pages in order |
-| 4.10.4 | Save PDF | Clean PDF output recorded in history under Scanner |
-| 4.10.5 | Import from gallery (no camera path) | Same pipeline runs on the picked image |
-| 4.10.6 | Retake several pages | Numbering restarts, no stale pages from the previous session |
-
-### 4.11 OCR Text (`ocr`) — models are bundled; test in airplane mode
+### 4.10 Document Scanner (`scan`) — Adobe Scan-style UX
 
 | # | Script | Expected |
 | --- | --- | --- |
-| 4.11.1 | Clean printed English page | Recognized text appears; searchable PDF: select/copy text in a PDF viewer |
-| 4.11.2 | Outputs | `stem ocr.pdf` + `stem ocr.txt` companion with per-page sections |
-| 4.11.3 | CJK page (Chinese/Japanese/Korean) | Text recognized (bundled CJK models) |
-| 4.11.4 | Devanagari (Hindi) page | Text recognized (bundled model) |
-| 4.11.5 | Arabic page | Typed limitation surfaced (no Arabic model exists in ML Kit) — expectation set, not a silent failure |
+| 4.10.1 | Photograph document with filter themes | 4 filter chips available: Auto Clean, Original Color, Grayscale, B&W Text; live theme selection applies to capture |
+| 4.10.2 | Camera torch toggle | Torch icon in AppBar toggles flashlight on supported devices |
+| 4.10.3 | Multi-page capture & thumbnail strip | Captured pages show in horizontal preview bar with page counter badge; tap thumbnail to change filter theme or delete page |
+| 4.10.4 | Save Scanned PDF dialog | Transparent dialog shows filename and exact destination (`PureFile / Documents / outputs`) |
+| 4.10.5 | Post-scan action sheet | Bottom sheet offers Open, Share, Save As (custom device path), and direct Recognize Text (OCR) |
+| 4.10.6 | Import from gallery (no camera path) | Same enhancement filters and multi-page pipeline run on picked images |
+
+### 4.11 OCR Text (`ocr`) — multi-script support
+
+| # | Script | Expected |
+| --- | --- | --- |
+| 4.11.1 | Script selector | Script dropdown offers Latin, Chinese, Devanagari, Japanese, and Korean |
+| 4.11.2 | Clean printed English page | Recognized text appears; searchable PDF: select/copy text in a PDF viewer |
+| 4.11.3 | Outputs | `stem ocr.pdf` + `stem ocr.txt` companion with per-page sections; 3-dots menu allows Save to Device & Rename |
+| 4.11.4 | CJK page (Chinese/Japanese/Korean) | Select corresponding script → text recognized cleanly via bundled models |
+| 4.11.5 | Devanagari (Hindi) page | Select Devanagari script → Hindi text recognized accurately |
 | 4.11.6 | Blank/empty page | Result still produced with a "no text found" warning, not an error |
-| 4.11.7 | Handwriting | Best-effort recognition with expectations set |
-| 4.11.8 | Page selection field | Only selected pages processed; all-out-of-range → typed rejection, nothing written |
-| 4.11.9 | Airplane mode OCR | Works identically — no Play Services download (models bundled in the APK) |
+| 4.11.7 | Airplane mode OCR | Works 100% offline without Play Services download (models bundled in the APK) |
 
-### 4.12 Sign & Stamp (`sign`)
+### 4.12 Sign & Stamp (`sign`) — Studio & Signature Library
 
 | # | Script | Expected |
 | --- | --- | --- |
-| 4.12.1 | Draw signature, place bottom-right on page 1 | Stamp appears only on page 1; other pages untouched |
-| 4.12.2 | Signature background | Transparent — no white box over the PDF content |
-| 4.12.3 | Size slider extremes (5 % → 80 %) | Clamped correctly, aspect preserved |
-| 4.12.4 | All 5 anchor positions | Stamp hugs the chosen corner/edge with margin |
-| 4.12.5 | Flatten result | Open in another viewer: stamp cannot be selected/deleted (real content, not an annotation) |
-| 4.12.6 | Import stamp image instead of drawing | Works the same |
-| 4.12.7 | Undo/clear on the pad | Strokes removed correctly |
-| 4.12.8 | Empty canvas | Save disabled until at least one stroke exists |
-| 4.12.9 | Out-of-range page number | Typed rejection, nothing written |
+| 4.12.1 | Ink color selection | 3 ink colors selectable: Black, Legal Blue (#1D4ED8), and Crimson Red (#DC2626) |
+| 4.12.2 | Date stamp toggle | Checking "Include date stamp" stamps "Signed: YYYY-MM-DD" below the signature |
+| 4.12.3 | Signature Library | Tap "Save & Use" saves PNG to local library (`signatures/`); carousel allows one-tap selection or deletion of saved signatures |
+| 4.12.4 | Draw signature, place on PDF | Stamp appears on target page; transparent background; flattened into PDF content |
+| 4.12.5 | Post-save sheet | Bottom sheet provides Open, Share, and Save As |
 
 ---
 

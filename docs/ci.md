@@ -12,10 +12,13 @@ per-architecture split APKs (arm64, arm32, x86_64) are needed.
 2. `flutter analyze` — fails the build on any issue
 3. `flutter test` — the test suite
 4. `tool/egress_check.sh` — source-level network-egress scan
-5. `flutter build apk --release` (single universal APK)
+5. `flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols`
+   - Produces lightweight, per-ABI APKs (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
+   - Uses R8 full code minification (`isMinifyEnabled = true`) & resource shrinking (`isShrinkResources = true`) with `android/app/proguard-rules.pro`
+   - Cuts download size from ~55MB down to ~15–18MB
 6. **Offline guarantee gate**: greps the merged release manifest for
    `INTERNET` — fails the workflow if a dependency ever sneaks it back in
-7. Uploads single artifact: `purefile-release-apk` (`app-release.apk`)
+7. Uploads release APK artifacts: `purefile-release-apks` (individual per-ABI APKs)
 
 ## Getting the APK onto your phone
 

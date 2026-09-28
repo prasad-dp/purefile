@@ -193,4 +193,14 @@ void main() {
     expect(PdfCompressQuality.high.renderScale, 1.5);
     expect(PdfCompressQuality.high.jpegQuality, greaterThan(PdfCompressQuality.low.jpegQuality));
   });
+
+  test('args respects imageThresholdPages parameter', () {
+    const args = PdfCompressArgs(
+      inputPath: 'dummy.pdf',
+      outputPath: 'out.pdf',
+      quality: PdfCompressQuality.medium,
+      imageThresholdPages: 8,
+    );
+    expect(args.imageThresholdPages, 8);
+  });
 }

@@ -67,8 +67,9 @@ final imageConvertTargetProvider =
 final ocrOptionsProvider = StateProvider<OcrOptionsState>((_) => OcrOptionsState());
 
 final class OcrOptionsState {
-  OcrOptionsState() : pagesController = TextEditingController();
+  OcrOptionsState({this.script = 'latin'}) : pagesController = TextEditingController();
   final TextEditingController pagesController;
+  String script;
 
   /// Empty text = every page (the service clamps to real pages).
   List<int> get pages => parsePageSelection(pagesController.text);
@@ -477,14 +478,28 @@ class JobFlowController extends Notifier<JobFlowState> {
                   : '$fileCount files packed · skipped: ${failedNames.join(', ')}',
             ),
           ],
-        ZipExtractResult(:final folderPath, :final fileCount, :final totalBytes) =>
+        ZipExtractResult(
+          :final folderPath,
+          :final fileCount,
+          :final totalBytes,
+          :final filePaths,
+        ) =>
           [
-            OutputInfo(
-              path: folderPath,
-              name: folderPath.split(Platform.pathSeparator).last,
-              sizeBytes: totalBytes,
-              warning: '$fileCount files extracted',
-            ),
+            if (filePaths.isEmpty)
+              OutputInfo(
+                path: folderPath,
+                name: folderPath.split(Platform.pathSeparator).last,
+                sizeBytes: totalBytes,
+                warning: '$fileCount files extracted',
+              )
+            else
+              for (final p in filePaths)
+                OutputInfo(
+                  path: p,
+                  name: p.split(Platform.pathSeparator).last,
+                  sizeBytes: File(p).existsSync() ? File(p).lengthSync() : 0,
+                  warning: 'Extracted · $fileCount files in ${folderPath.split(Platform.pathSeparator).last}',
+                ),
           ],
         OcrResult(
           :final outputPath,
@@ -627,7 +642,7 @@ Future<Object?> runToolTask(Object? args, runner.PfJobContext ctx) async {
     case OcrArgs():
       return ocrTask(
         args,
-        recognize: mlkitPageRecognizer(),
+        recognize: mlkitPageRecognizer(scriptName: args.script),
         renderPage: ocrPageRaster,
         onProgress: ctx.report,
         isCancelled: () => ctx.isCancelled,

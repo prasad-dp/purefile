@@ -1,15 +1,20 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
+
+import '../../core/file_io.dart';
 
 import '../../core/history/history_store.dart';
 import '../../core/theme.dart';
 import '../../core/tools.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../widgets/ios_group.dart';
+
+enum _HistoryItemAction { saveAs, rename }
 
 /// Local outputs history (F19b): iOS grouped rows — tinted type-icon plates,
 /// hairline separators, swipe-to-delete kept, crafted empty state.
@@ -119,16 +124,55 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      trailing: IconButton(
-                        tooltip: loc.share,
-                        icon: Icon(Icons.ios_share_rounded,
-                            size: 20,
-                            color: Theme.of(context).colorScheme.primary),
-                        onPressed: () => e.isDirectory
-                            ? _shareFolder(e)
-                            : SharePlus.instance.share(
-                                ShareParams(files: [XFile(e.path)]),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: loc.share,
+                            icon: Icon(Icons.ios_share_rounded,
+                                size: 20,
+                                color: Theme.of(context).colorScheme.primary),
+                            onPressed: () => e.isDirectory
+                                ? _shareFolder(e)
+                                : SharePlus.instance.share(
+                                    ShareParams(files: [XFile(e.path)]),
+                                  ),
+                          ),
+                          PopupMenuButton<_HistoryItemAction>(
+                            icon: const Icon(Icons.more_vert_rounded, size: 20),
+                            tooltip: 'More actions',
+                            onSelected: (action) {
+                              switch (action) {
+                                case _HistoryItemAction.saveAs:
+                                  _saveToDevice(e);
+                                case _HistoryItemAction.rename:
+                                  _renameEntry(e);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: _HistoryItemAction.saveAs,
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.download_rounded, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Save to Device'),
+                                  ],
+                                ),
                               ),
+                              const PopupMenuItem(
+                                value: _HistoryItemAction.rename,
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit_rounded, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Rename'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                       onTap: () => OpenFilex.open(e.path),
                     ),
@@ -139,6 +183,115 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
       },
     );
+  }
+
+  Future<void> _saveToDevice(HistoryEntry e) async {
+    final file = File(e.path);
+    if (!file.existsSync()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File not found')),
+      );
+      return;
+    }
+    try {
+      final bytes = await file.readAsBytes();
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save to Device',
+        fileName: e.fileName,
+        type: FileType.any,
+        bytes: bytes,
+      );
+      if (savePath != null) {
+        final targetFile = File(savePath);
+        if (!targetFile.existsSync() || targetFile.lengthSync() == 0) {
+          await file.copy(savePath);
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved: ${savePath.split(Platform.pathSeparator).last}')),
+        );
+      }
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Save error: $err')),
+      );
+    }
+  }
+
+  Future<void> _renameEntry(HistoryEntry e) async {
+    final controller = TextEditingController(text: e.fileName);
+    final formKey = GlobalKey<FormState>();
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename File'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'New name',
+              hintText: 'Enter new file name',
+            ),
+            validator: (val) {
+              if (val == null || val.trim().isEmpty) return 'Name cannot be empty';
+              if (RegExp(r'[\\/:*?"<>|\x00-\x1f]').hasMatch(val)) {
+                return 'Invalid characters in name';
+              }
+              return null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.of(ctx).pop(controller.text.trim());
+              }
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.trim().isNotEmpty && newName.trim() != e.fileName) {
+      final cleanName = newName.trim();
+      final oldFile = File(e.path);
+      if (!oldFile.existsSync()) return;
+
+      final dir = oldFile.parent.path;
+      final uniquePath = uniqueDestination(dir, cleanName);
+      try {
+        final renamedFile = await oldFile.rename(uniquePath);
+        final actualNewName = renamedFile.path.split(Platform.pathSeparator).last;
+        await ref.read(historyProvider).record(HistoryEntry(
+              path: renamedFile.path,
+              fileName: actualNewName,
+              toolId: e.toolId,
+              sizeBytes: e.sizeBytes,
+              createdAt: e.createdAt,
+            ));
+        await _reload();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Renamed to $actualNewName')),
+        );
+      } catch (err) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Rename failed: $err')),
+        );
+      }
+    }
   }
 
   Future<void> _shareFolder(HistoryEntry e) async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme.dart';
 import '../../core/tools.dart';
@@ -18,6 +19,57 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _query = '';
+  List<String> _pinnedToolIds = const [
+    'pdf-merge',
+    'pdf-compress',
+    'scan',
+    'sign',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('pf.favorite_tools');
+    if (saved != null && mounted) {
+      setState(() => _pinnedToolIds = saved);
+    }
+  }
+
+  Future<void> _togglePin(String toolId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final updated = List<String>.from(_pinnedToolIds);
+    final isPinnedNow = !updated.contains(toolId);
+    if (isPinnedNow) {
+      updated.add(toolId);
+    } else {
+      updated.remove(toolId);
+    }
+    await prefs.setStringList('pf.favorite_tools', updated);
+    if (mounted) {
+      setState(() => _pinnedToolIds = updated);
+      final tool = kPfTools.firstWhere(
+        (t) => t.id == toolId,
+        orElse: () => kPfTools.first,
+      );
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isPinnedNow
+                ? 'Pinned "${tool.title}" to Quick Access'
+                : 'Unpinned "${tool.title}"',
+          ),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +79,10 @@ class _HomeScreenState extends State<HomeScreen> {
             _query.isEmpty ||
             t.title.toLowerCase().contains(_query) ||
             t.subtitle.toLowerCase().contains(_query))
+        .toList();
+
+    final pinnedTools = kPfTools
+        .where((t) => _pinnedToolIds.contains(t.id))
         .toList();
 
     final categories = PfCategory.values
@@ -84,6 +140,55 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+          if (_query.isEmpty && pinnedTools.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.star_rounded, size: 20, color: Colors.amber),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Quick Access',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.1,
+                          ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Long-press to pin',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverGrid.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1.3,
+                ),
+                itemCount: pinnedTools.length,
+                itemBuilder: (context, i) {
+                  final tool = pinnedTools[i];
+                  return ToolCard(
+                    tool: tool,
+                    isPinned: true,
+                    onTap: () => context.push(tool.route),
+                    onTogglePin: () => _togglePin(tool.id),
+                  );
+                },
+              ),
+            ),
+          ],
           for (final category in categories) ...[
             SliverToBoxAdapter(
               child: Padding(
@@ -123,7 +228,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       tools.where((t) => t.category == category).elementAt(i);
                   return ToolCard(
                     tool: tool,
+                    isPinned: _pinnedToolIds.contains(tool.id),
                     onTap: () => context.push(tool.route),
+                    onTogglePin: () => _togglePin(tool.id),
                   );
                 },
               ),
