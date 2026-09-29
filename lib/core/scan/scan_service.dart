@@ -97,6 +97,26 @@ double _edgeLength(QuadPoint a, QuadPoint b) {
   return math.sqrt(dx * dx + dy * dy);
 }
 
+/// Stitches two processed ID card sides (front + back) into a single page.
+ScanPage stitchIdCardPages({
+  required Uint8List frontBytes,
+  required Uint8List backBytes,
+  int quality = 90,
+}) {
+  final frontImg = img.decodeImage(frontBytes);
+  final backImg = img.decodeImage(backBytes);
+  if (frontImg == null || backImg == null) {
+    throw const ScanPageException('Failed to decode ID card images for stitching');
+  }
+  final stitched = stitchIdCardSides(front: frontImg, back: backImg);
+  final jpeg = img.encodeJpg(stitched, quality: quality);
+  return ScanPage(
+    bytes: Uint8List.fromList(jpeg),
+    width: stitched.width,
+    height: stitched.height,
+  );
+}
+
 /// Thrown for unreadable page images (typed at the UI layer).
 class ScanPageException implements Exception {
   const ScanPageException(this.message);

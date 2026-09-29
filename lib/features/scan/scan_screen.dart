@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -5,6 +6,7 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:open_filex/open_filex.dart';
@@ -15,11 +17,28 @@ import '../../core/history/history_store.dart';
 import '../../core/pdf/images_to_pdf_service.dart';
 import '../../core/scan/scan_service.dart';
 
-/// Feature 11: Document Scanner (Adobe Scan style).
+/// Document scan types (Adobe Scan modes).
+enum ScanDocType {
+  /// Standard single or multi-page documents, letters, receipts, and contracts.
+  document,
+
+  /// Two-sided ID cards, driver licenses, or badges stitched onto a single page.
+  idCard,
+
+  /// Wide pages, books, or two-column forms.
+  book,
+}
+
+/// Feature 11: Document Scanner (Adobe Scan full-screen experience).
 ///
-/// Multi-page camera capture with filter themes (Auto Clean, Original Color,
-/// Grayscale, B&W Text), reorderable page strip, per-page filter adjustment,
-/// and transparent save destination with direct Open, Share, and Save to Device.
+/// Features:
+/// - Immersive edge-to-edge full-screen camera viewfinder
+/// - Adobe Scan modes: Document, 2-Sided ID Card, Book / Form
+/// - Live viewfinder guides with corner brackets & ID card aspect reticle
+/// - 2-Sided ID card capture (front + back stitched onto single A4 sheet)
+/// - Auto Color (Magic Color), Original, Grayscale, and B&W Text filters
+/// - Quick thumbnail review bubble with page count badge
+/// - Reorderable page review, per-page filter adjustment, and high-DPI PDF export
 class ScanScreen extends ConsumerStatefulWidget {
   const ScanScreen({super.key});
 
@@ -27,25 +46,23 @@ class ScanScreen extends ConsumerStatefulWidget {
   ConsumerState<ScanScreen> createState() => _ScanScreenState();
 }
 
-class _ScanScreenState extends ConsumerState<ScanScreen> {
+class _ScanScreenState extends ConsumerState<ScanScreen>
+    with SingleTickerProviderStateMixin {
   CameraController? _controller;
   bool _camReady = false;
   bool _camFailed = false;
   bool _busy = false;
   bool _saving = false;
   bool _torchOn = false;
-  ScanFilter _activeFilter = ScanFilter.enhanced;
-  final List<_ScanPageItem> _pages = [];
+  bool _autoCapture = false;
 
-  Future<void> _toggleTorch() async {
-    final ctrl = _controller;
-    if (ctrl == null || !_camReady) return;
-    try {
-      final next = !_torchOn;
-      await ctrl.setFlashMode(next ? FlashMode.torch : FlashMode.off);
-      setState(() => _torchOn = next);
-    } catch (_) {}
-  }
+  ScanDocType _scanMode = ScanDocType.document;
+  ScanFilter _activeFilter = ScanFilter.enhanced;
+
+  /// Stored front side of an ID card when in [ScanDocType.idCard] mode.
+  Uint8List? _idCardFrontBytes;
+
+  final List<_ScanPageItem> _pages = [];
 
   @override
   void initState() {
@@ -54,8 +71,6 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     _initCamera();
   }
 
-  /// Scratch pages from a previous run are junk (numbering restarts at
-  /// page_01); anything worth keeping is already inside a saved PDF.
   void _resetSessionDir() {
     getApplicationDocumentsDirectory().then((dir) {
       final d = Directory('${dir.path}${Platform.pathSeparator}scan_session');
@@ -100,25 +115,75 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     super.dispose();
   }
 
+  Future<void> _toggleTorch() async {
+    final ctrl = _controller;
+    if (ctrl == null || !_camReady) return;
+    try {
+      final next = !_torchOn;
+      await ctrl.setFlashMode(next ? FlashMode.torch : FlashMode.off);
+      setState(() => _torchOn = next);
+    } catch (_) {}
+  }
+
   Future<void> _capture() async {
     final ctrl = _controller;
     if (_busy || !_camReady || ctrl == null) return;
+    HapticFeedback.mediumImpact();
     setState(() => _busy = true);
     try {
       final file = await ctrl.takePicture();
       final bytes = await file.readAsBytes();
-      await _addProcessed(bytes, _activeFilter);
-    } on CameraException {
-      if (mounted) {
-        setState(() => _camFailed = true);
+
+      if (_scanMode == ScanDocType.idCard) {
+        if (_idCardFrontBytes == null) {
+          // Captured front side — now prompt for back side
+          setState(() {
+            _idCardFrontBytes = bytes;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Front side captured! Now flip ID to scan back side.'),
+                duration: Duration(seconds: 3),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } else {
+          // Captured back side — stitch front and back into single document page
+          final frontBytes = _idCardFrontBytes!;
+          final backBytes = bytes;
+          setState(() => _idCardFrontBytes = null);
+
+          // Process both sides with active filter
+          final procFront = await runScanPageInIsolate(frontBytes, _activeFilter);
+          final procBack = await runScanPageInIsolate(backBytes, _activeFilter);
+
+          // Stitch onto single clean A4 sheet
+          final stitched = await runStitchIdCardInIsolate(procFront.bytes, procBack.bytes);
+          await _saveAndAddPage(stitched.bytes, stitched.width, stitched.height, bytes, _activeFilter);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('ID Card (2-sided) stitched onto single page ✓'),
+                duration: Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        }
+      } else {
+        // Standard document or book page
+        await _addProcessed(bytes, _activeFilter);
       }
+    } on CameraException {
+      if (mounted) setState(() => _camFailed = true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  /// Gallery import runs through the exact same processing pipeline as the
-  /// camera path — a photo of a document becomes a scan page either way.
   Future<void> _import() async {
     if (_busy) return;
     final picked = await FilePicker.platform.pickFiles(
@@ -141,16 +206,26 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
 
   Future<void> _addProcessed(Uint8List bytes, ScanFilter filter) async {
     final page = await runScanPageInIsolate(bytes, filter);
+    await _saveAndAddPage(page.bytes, page.width, page.height, bytes, filter);
+  }
+
+  Future<void> _saveAndAddPage(
+    Uint8List jpegBytes,
+    int width,
+    int height,
+    Uint8List rawBytes,
+    ScanFilter filter,
+  ) async {
     final dir = await getApplicationDocumentsDirectory();
     final sessionDir = '${dir.path}${Platform.pathSeparator}scan_session';
     final session = ScanSession(sessionDir);
-    final path = session.addPage(page.bytes);
+    final path = session.addPage(jpegBytes);
     if (mounted) {
       setState(() => _pages.add(_ScanPageItem(
             path: path,
-            width: page.width,
-            height: page.height,
-            rawBytes: bytes,
+            width: width,
+            height: height,
+            rawBytes: rawBytes,
             filter: filter,
           )));
     }
@@ -174,76 +249,31 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     }
   }
 
-  Future<void> _showPageOptions(int index) async {
-    final item = _pages[index];
+  Future<void> _openReviewSheet() async {
+    if (_pages.isEmpty) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Page ${index + 1} Filter',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 180,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(File(item.path), fit: BoxFit.contain),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final f in [
-                      (ScanFilter.enhanced, 'Auto Color'),
-                      (ScanFilter.original, 'Original'),
-                      (ScanFilter.grayscale, 'Grayscale'),
-                      (ScanFilter.monochrome, 'B&W Text'),
-                    ])
-                      ChoiceChip(
-                        label: Text(f.$2),
-                        selected: item.filter == f.$1,
-                        onSelected: (selected) async {
-                          if (selected) {
-                            await _changePageFilter(index, f.$1);
-                            setModalState(() {});
-                          }
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.red),
-                        label: const Text('Delete Page', style: TextStyle(color: Colors.red)),
-                        onPressed: () {
-                          setState(() => _pages.removeAt(index));
-                          Navigator.pop(ctx);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Done'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _ReviewPagesModal(
+        pages: _pages,
+        onFilterChanged: (idx, filter) async {
+          await _changePageFilter(idx, filter);
+          setState(() {});
+        },
+        onDelete: (idx) {
+          setState(() => _pages.removeAt(idx));
+        },
+        onReorder: (oldI, newI) {
+          setState(() {
+            final p = _pages.removeAt(oldI);
+            _pages.insert(newI, p);
+          });
+        },
+        onSavePdf: () {
+          Navigator.pop(ctx);
+          _startSavePdf();
+        },
       ),
     );
   }
@@ -268,7 +298,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
               controller: nameController,
               autofocus: true,
               decoration: const InputDecoration(
-                labelText: 'PDF Name',
+                labelText: 'PDF Document Name',
                 suffixText: '.pdf',
               ),
             ),
@@ -301,7 +331,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, nameController.text.trim()),
-            child: const Text('Save'),
+            child: const Text('Save PDF'),
           ),
         ],
       ),
@@ -449,9 +479,9 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                 child: FilledButton(
                   onPressed: () {
                     Navigator.pop(sheetCtx);
-                    setState(_pages.clear);
+                    context.pop();
                   },
-                  child: const Text('Scan New Document'),
+                  child: const Text('Done'),
                 ),
               ),
             ],
@@ -461,56 +491,100 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     );
   }
 
-  void _reorder(int oldI, int newI) {
-    setState(() {
-      final p = _pages.removeAt(oldI);
-      _pages.insert(newI, p);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scan Document'),
-        actions: [
-          if (_camReady)
-            IconButton(
-              tooltip: _torchOn ? 'Turn off flash' : 'Turn on flash',
-              icon: Icon(_torchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded),
-              onPressed: _toggleTorch,
-            ),
-        ],
-      ),
-      body: Column(
+      backgroundColor: Colors.black,
+      body: Stack(
         children: [
-          Expanded(child: _preview()),
-          _filterBar(),
-          _pageStrip(),
-          _controls(),
+          // 1. Edge-to-edge full screen camera preview
+          Positioned.fill(child: _buildCameraPreview()),
+
+          // 2. Viewfinder overlays and live reticle guidelines
+          Positioned.fill(child: _buildViewfinderOverlay()),
+
+          // 3. Floating top bar (Back, Flash, Auto/Manual toggle)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopBar(),
+          ),
+
+          // 4. Floating bottom bar (Filter chips, Mode carousel, Shutter & Thumbnail bubble)
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: _buildBottomControls(),
+          ),
+
+          // 5. Loading overlay when busy
+          if (_busy || _saving)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black45,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(color: Colors.white),
+                        const SizedBox(height: 12),
+                        Text(
+                          _saving ? 'Saving PDF…' : 'Enhancing document…',
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _preview() {
+  Widget _buildCameraPreview() {
     if (_camReady && _controller != null) {
-      return CameraPreview(_controller!);
+      final size = MediaQuery.of(context).size;
+      final previewSize = _controller!.value.previewSize;
+      if (previewSize == null) return const SizedBox.shrink();
+
+      return ClipRect(
+        child: SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: previewSize.height,
+              height: previewSize.width,
+              child: CameraPreview(_controller!),
+            ),
+          ),
+        ),
+      );
     }
+
     return Container(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      color: Colors.black,
       alignment: Alignment.center,
       padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.document_scanner_rounded,
-              size: 48, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(height: 12),
+          const Icon(Icons.document_scanner_rounded, size: 56, color: Colors.white54),
+          const SizedBox(height: 16),
           Text(
             _camFailed
-                ? 'Camera unavailable — import a photo instead'
+                ? 'Camera unavailable — import photos from gallery instead'
                 : 'Starting camera…',
+            style: const TextStyle(color: Colors.white70, fontSize: 15),
             textAlign: TextAlign.center,
           ),
         ],
@@ -518,7 +592,423 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     );
   }
 
-  Widget _filterBar() {
+  Widget _buildViewfinderOverlay() {
+    return IgnorePointer(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final w = constraints.maxWidth;
+          final h = constraints.maxHeight;
+
+          return Stack(
+            children: [
+              // Reticle guide depending on mode
+              Center(
+                child: _buildModeReticle(w, h),
+              ),
+
+              // Guidance prompt chip
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 70,
+                left: 20,
+                right: 20,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.65),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white24, width: 0.8),
+                    ),
+                    child: Text(
+                      _getGuidanceText(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.2,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  String _getGuidanceText() {
+    switch (_scanMode) {
+      case ScanDocType.document:
+        return 'Align document inside frame';
+      case ScanDocType.idCard:
+        if (_idCardFrontBytes == null) {
+          return 'Step 1 of 2: Position FRONT of ID Card';
+        } else {
+          return 'Step 2 of 2: Flip and position BACK of ID Card';
+        }
+      case ScanDocType.book:
+        return 'Position book or form inside frame';
+    }
+  }
+
+  Widget _buildModeReticle(double screenW, double screenH) {
+    if (_scanMode == ScanDocType.idCard) {
+      // ID Card standard aspect ratio ~1.586
+      final cardW = screenW * 0.85;
+      final cardH = cardW / 1.586;
+
+      return Container(
+        width: cardW,
+        height: cardH,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFF00E5FF),
+            width: 2.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF00E5FF).withValues(alpha: 0.25),
+              blurRadius: 16,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_scanMode == ScanDocType.book) {
+      final bookW = screenW * 0.90;
+      final bookH = screenH * 0.58;
+
+      return Container(
+        width: bookW,
+        height: bookH,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white70, width: 1.5),
+        ),
+        child: Center(
+          child: Container(
+            width: 1.5,
+            height: bookH,
+            color: Colors.white38,
+          ),
+        ),
+      );
+    }
+
+    // Default Document Reticle (Adobe Scan style corner brackets)
+    final docW = screenW * 0.86;
+    final docH = screenH * 0.58;
+
+    return SizedBox(
+      width: docW,
+      height: docH,
+      child: Stack(
+        children: [
+          // Top Left
+          Positioned(
+            top: 0,
+            left: 0,
+            child: _buildCornerBracket(top: true, left: true),
+          ),
+          // Top Right
+          Positioned(
+            top: 0,
+            right: 0,
+            child: _buildCornerBracket(top: true, left: false),
+          ),
+          // Bottom Left
+          Positioned(
+            bottom: 0,
+            left: 0,
+            child: _buildCornerBracket(top: false, left: true),
+          ),
+          // Bottom Right
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: _buildCornerBracket(top: false, left: false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCornerBracket({required bool top, required bool left}) {
+    const double length = 28;
+    const double thickness = 3.5;
+    const color = Color(0xFF00E5FF);
+
+    return SizedBox(
+      width: length,
+      height: length,
+      child: CustomPaint(
+        painter: _CornerPainter(
+          top: top,
+          left: left,
+          thickness: thickness,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 8, 16, 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.black.withValues(alpha: 0.8),
+            Colors.transparent,
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Close button
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white, size: 26),
+            onPressed: () {
+              if (_pages.isNotEmpty) {
+                showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Discard Scan Session?'),
+                    content: Text(
+                        'You have ${_pages.length} unsaved scan page(s). Exiting will discard them.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Keep Scanning'),
+                      ),
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          context.pop();
+                        },
+                        style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                        child: const Text('Discard'),
+                      ),
+                    ],
+                  ),
+                );
+              } else {
+                context.pop();
+              }
+            },
+          ),
+
+          // Flash toggle
+          IconButton(
+            icon: Icon(
+              _torchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+              color: _torchOn ? const Color(0xFFFFD600) : Colors.white70,
+              size: 24,
+            ),
+            onPressed: _toggleTorch,
+          ),
+
+          // Auto / Manual capture pill
+          InkWell(
+            onTap: () => setState(() => _autoCapture = !_autoCapture),
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _autoCapture
+                    ? const Color(0xFF00E5FF).withValues(alpha: 0.25)
+                    : Colors.white12,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _autoCapture ? const Color(0xFF00E5FF) : Colors.white30,
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _autoCapture ? Icons.bolt_rounded : Icons.touch_app_rounded,
+                    color: _autoCapture ? const Color(0xFF00E5FF) : Colors.white,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _autoCapture ? 'Auto Capture' : 'Manual',
+                    style: TextStyle(
+                      color: _autoCapture ? const Color(0xFF00E5FF) : Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomControls() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, MediaQuery.of(context).padding.bottom + 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.transparent,
+            Colors.black.withValues(alpha: 0.95),
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Retake button if front of ID card is pending
+          if (_scanMode == ScanDocType.idCard && _idCardFrontBytes != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: TextButton.icon(
+                onPressed: () => setState(() => _idCardFrontBytes = null),
+                icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.amber),
+                label: const Text('Retake Front Side', style: TextStyle(color: Colors.amber)),
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                ),
+              ),
+            ),
+
+          // Filter chips
+          _buildFilterRow(),
+
+          const SizedBox(height: 12),
+
+          // Scan Mode carousel
+          _buildModeSelector(),
+
+          const SizedBox(height: 20),
+
+          // Shutter Action Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // Gallery import
+              IconButton(
+                onPressed: _busy ? null : _import,
+                icon: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white12,
+                  ),
+                  child: const Icon(Icons.photo_library_outlined, color: Colors.white, size: 24),
+                ),
+              ),
+
+              // Large Adobe Scan circular shutter button
+              GestureDetector(
+                onTap: _busy || !_camReady ? null : _capture,
+                child: Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 4),
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 62,
+                      height: 62,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _scanMode == ScanDocType.idCard
+                            ? const Color(0xFF00E5FF)
+                            : Colors.white,
+                      ),
+                      child: _busy
+                          ? const Center(
+                              child: SizedBox(
+                                width: 26,
+                                height: 26,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
+
+              // Page thumbnail bubble with badge
+              GestureDetector(
+                onTap: _pages.isEmpty ? null : _openReviewSheet,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.white12,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white30, width: 1.2),
+                      ),
+                      child: _pages.isNotEmpty
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(9),
+                              child: Image.file(
+                                File(_pages.last.path),
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : const Icon(Icons.description_outlined, color: Colors.white54, size: 22),
+                    ),
+                    if (_pages.isNotEmpty)
+                      Positioned(
+                        top: -6,
+                        right: -6,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF00E5FF),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '${_pages.length}',
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterRow() {
     final filters = [
       (ScanFilter.enhanced, 'Auto Color', Icons.auto_fix_high_rounded),
       (ScanFilter.original, 'Original', Icons.photo_camera_back_outlined),
@@ -526,134 +1016,287 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       (ScanFilter.monochrome, 'B&W Text', Icons.text_snippet_outlined),
     ];
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final f in filters)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  avatar: Icon(f.$3, size: 16),
-                  label: Text(f.$2),
-                  selected: _activeFilter == f.$1,
-                  onSelected: (selected) {
-                    if (selected) setState(() => _activeFilter = f.$1);
-                  },
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (final f in filters)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: ChoiceChip(
+                avatar: Icon(
+                  f.$3,
+                  size: 14,
+                  color: _activeFilter == f.$1 ? Colors.black : Colors.white70,
                 ),
+                label: Text(
+                  f.$2,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _activeFilter == f.$1 ? Colors.black : Colors.white,
+                  ),
+                ),
+                selected: _activeFilter == f.$1,
+                selectedColor: Colors.white,
+                backgroundColor: Colors.white12,
+                showCheckmark: false,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                onSelected: (selected) {
+                  if (selected) setState(() => _activeFilter = f.$1);
+                },
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _pageStrip() {
-    return SizedBox(
-      height: 96,
-      child: _pages.isEmpty
-          ? const SizedBox.shrink()
-          : ReorderableListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _pages.length,
-              onReorderItem: _reorder,
-              buildDefaultDragHandles: true,
-              itemBuilder: (context, i) {
-                final p = _pages[i];
-                return Stack(
-                  key: ValueKey(p.path),
-                  children: [
-                    InkWell(
-                      onTap: () => _showPageOptions(i),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.file(File(p.path),
-                              width: 72, height: 88, fit: BoxFit.cover),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: InkWell(
-                        onTap: () => setState(() => _pages.removeAt(i)),
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.black54,
-                          ),
-                          child: const Icon(Icons.cancel_rounded,
-                              size: 18, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 4,
-                      left: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '${i + 1}',
-                          style: const TextStyle(color: Colors.white, fontSize: 10),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
+  Widget _buildModeSelector() {
+    final modes = [
+      (ScanDocType.document, 'Document'),
+      (ScanDocType.idCard, 'ID Card (2-Sided)'),
+      (ScanDocType.book, 'Book / Form'),
+    ];
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (final m in modes)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: InkWell(
+              onTap: () {
+                if (_scanMode != m.$1) {
+                  setState(() {
+                    _scanMode = m.$1;
+                    _idCardFrontBytes = null;
+                  });
+                }
               },
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _scanMode == m.$1
+                      ? Colors.white.withValues(alpha: 0.18)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _scanMode == m.$1 ? const Color(0xFF00E5FF) : Colors.transparent,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  m.$2,
+                  style: TextStyle(
+                    color: _scanMode == m.$1 ? const Color(0xFF00E5FF) : Colors.white60,
+                    fontSize: 13,
+                    fontWeight: _scanMode == m.$1 ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
             ),
+          ),
+      ],
     );
   }
+}
 
-  Widget _controls() {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+/// Modal sheet for reviewing, reordering, filtering, and saving scanned pages.
+class _ReviewPagesModal extends StatelessWidget {
+  const _ReviewPagesModal({
+    required this.pages,
+    required this.onFilterChanged,
+    required this.onDelete,
+    required this.onReorder,
+    required this.onSavePdf,
+  });
+
+  final List<_ScanPageItem> pages;
+  final void Function(int index, ScanFilter filter) onFilterChanged;
+  final void Function(int index) onDelete;
+  final void Function(int oldIndex, int newIndex) onReorder;
+  final VoidCallback onSavePdf;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.78,
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _import,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Import'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _pages.isEmpty || _saving ? null : _startSavePdf,
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.picture_as_pdf_rounded),
-                    label: Text(_pages.isEmpty
-                        ? 'Save PDF'
-                        : 'Save PDF (${_pages.length})'),
-                  ),
-                ),
-              ],
+            // Drag handle
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 10),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _busy || !_camReady ? null : _capture,
-                icon: const Icon(Icons.camera_alt_rounded),
-                label: Text(_busy ? 'Processing…' : 'Capture page'),
+
+            // Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Scanned Pages (${pages.length})',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            const Divider(color: Colors.white12, height: 1),
+
+            // Reorderable page list
+            Expanded(
+              child: pages.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No scanned pages yet',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    )
+                  : ReorderableListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      itemCount: pages.length,
+                      onReorder: onReorder,
+                      itemBuilder: (ctx, i) {
+                        final p = pages[i];
+                        return Container(
+                          key: ValueKey(p.path),
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Row(
+                            children: [
+                              // Drag reorder handle
+                              const Icon(Icons.drag_indicator_rounded, color: Colors.white38),
+                              const SizedBox(width: 8),
+
+                              // Page thumbnail
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(p.path),
+                                  width: 60,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+
+                              // Details & Filter
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Page ${i + 1}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 6,
+                                      children: [
+                                        for (final f in [
+                                          (ScanFilter.enhanced, 'Auto Color'),
+                                          (ScanFilter.original, 'Original'),
+                                          (ScanFilter.grayscale, 'Grayscale'),
+                                          (ScanFilter.monochrome, 'B&W Text'),
+                                        ])
+                                          ChoiceChip(
+                                            label: Text(
+                                              f.$2,
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: p.filter == f.$1 ? Colors.black : Colors.white70,
+                                              ),
+                                            ),
+                                            selected: p.filter == f.$1,
+                                            selectedColor: Colors.white,
+                                            backgroundColor: Colors.white10,
+                                            showCheckmark: false,
+                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: -2),
+                                            onSelected: (selected) {
+                                              if (selected) onFilterChanged(i, f.$1);
+                                            },
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Delete button
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                                onPressed: () => onDelete(i),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+
+            // Bottom action row
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white30),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('Add More Pages'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: pages.isEmpty ? null : onSavePdf,
+                      icon: const Icon(Icons.picture_as_pdf_rounded),
+                      label: Text('Save PDF (${pages.length})'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E5FF),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -678,6 +1321,53 @@ class _ScanPageItem {
   ScanFilter filter;
 }
 
+class _CornerPainter extends CustomPainter {
+  _CornerPainter({
+    required this.top,
+    required this.left,
+    required this.thickness,
+    required this.color,
+  });
+
+  final bool top;
+  final bool left;
+  final double thickness;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = thickness
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final path = Path();
+    if (top && left) {
+      path.moveTo(0, size.height);
+      path.lineTo(0, 0);
+      path.lineTo(size.width, 0);
+    } else if (top && !left) {
+      path.moveTo(size.width, size.height);
+      path.lineTo(size.width, 0);
+      path.lineTo(0, 0);
+    } else if (!top && left) {
+      path.moveTo(0, 0);
+      path.lineTo(0, size.height);
+      path.lineTo(size.width, size.height);
+    } else {
+      path.moveTo(size.width, 0);
+      path.lineTo(size.width, size.height);
+      path.lineTo(0, size.height);
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CornerPainter oldDelegate) => false;
+}
+
 /// Top-level isolate runner for single scan page image processing.
 Future<ScanPage> runScanPageInIsolate(Uint8List bytes, [ScanFilter filter = ScanFilter.enhanced]) {
   return Isolate.run(() => processScanPage(bytes, filter: filter));
@@ -686,4 +1376,9 @@ Future<ScanPage> runScanPageInIsolate(Uint8List bytes, [ScanFilter filter = Scan
 /// Top-level isolate runner for scan images to PDF generation.
 Future<ImagesToPdfResult> runScanImagesToPdfInIsolate(ImagesToPdfArgs args) {
   return Isolate.run(() => imagesToPdfTask(args));
+}
+
+/// Top-level isolate runner for stitching 2-sided ID card pages.
+Future<ScanPage> runStitchIdCardInIsolate(Uint8List front, Uint8List back) {
+  return Isolate.run(() => stitchIdCardPages(frontBytes: front, backBytes: back));
 }

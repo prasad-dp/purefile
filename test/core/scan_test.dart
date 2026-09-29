@@ -279,4 +279,26 @@ void main() {
     expect(Directory('${Directory.systemTemp.path}/pf_scan_test').existsSync(),
         isFalse);
   });
+
+  // ------------------------------------------------------- stitchIdCardSides
+
+  test('stitchIdCardSides combines front and back into single A4 portrait page', () {
+    final front = img.Image(width: 400, height: 250, numChannels: 3);
+    img.fill(front, color: img.ColorRgb8(100, 180, 240));
+
+    final back = img.Image(width: 400, height: 250, numChannels: 3);
+    img.fill(back, color: img.ColorRgb8(240, 180, 100));
+
+    final stitched = stitchIdCardSides(front: front, back: back, targetWidth: 1000);
+    expect(stitched.width, 1000);
+    // Standard A4 aspect ratio 1 : 1.4142
+    expect(stitched.height, (1000 * 1.4142).round());
+
+    final frontBytes = Uint8List.fromList(img.encodeJpg(front));
+    final backBytes = Uint8List.fromList(img.encodeJpg(back));
+    final page = stitchIdCardPages(frontBytes: frontBytes, backBytes: backBytes);
+    expect(page.bytes.isNotEmpty, isTrue);
+    expect(page.width, 1400);
+  });
 }
+

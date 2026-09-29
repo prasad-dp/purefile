@@ -294,6 +294,50 @@ img.Image applyMonochrome(img.Image src, {int threshold = 140}) {
   return out;
 }
 
+/// Combines front and back sides of an ID card onto a single clean portrait
+/// document page (standard A4 printable aspect ratio), suitable for printing,
+/// sharing, or archiving (Adobe Scan ID card style).
+img.Image stitchIdCardSides({
+  required img.Image front,
+  required img.Image back,
+  int targetWidth = 1400,
+}) {
+  // A4 aspect ratio: 1 : 1.4142
+  final targetHeight = (targetWidth * 1.4142).round();
+  final sheet = img.Image(width: targetWidth, height: targetHeight, numChannels: 3);
+  img.fill(sheet, color: img.ColorRgb8(255, 255, 255));
+
+  // Scale each card to fit ~85% of sheet width and at most 38% of height
+  final maxCardW = (targetWidth * 0.85).round();
+  final maxCardH = (targetHeight * 0.38).round();
+
+  img.Image scaleCard(img.Image card) {
+    final scaleW = maxCardW / card.width;
+    final scaleH = maxCardH / card.height;
+    final scale = scaleW < scaleH ? scaleW : scaleH;
+    return img.copyResize(
+      card,
+      width: (card.width * scale).round(),
+      height: (card.height * scale).round(),
+      interpolation: img.Interpolation.linear,
+    );
+  }
+
+  final frontScaled = scaleCard(front);
+  final backScaled = scaleCard(back);
+
+  final frontX = (targetWidth - frontScaled.width) ~/ 2;
+  final frontY = (targetHeight * 0.10).round();
+
+  final backX = (targetWidth - backScaled.width) ~/ 2;
+  final backY = (targetHeight * 0.54).round();
+
+  img.compositeImage(sheet, frontScaled, dstX: frontX, dstY: frontY);
+  img.compositeImage(sheet, backScaled, dstX: backX, dstY: backY);
+
+  return sheet;
+}
+
 // ---------------------------------------------------------------------------
 // Homography from unit square to arbitrary quad (projective mapping).
 // ---------------------------------------------------------------------------
