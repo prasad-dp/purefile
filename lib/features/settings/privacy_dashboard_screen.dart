@@ -1,11 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/errors.dart';
-import '../../core/jobs/job_controller.dart';
 import '../../core/privacy/usage_store.dart';
 import '../../core/theme.dart';
 import '../../core/tools.dart';
@@ -14,81 +10,12 @@ import '../../widgets/ios_group.dart';
 
 /// Privacy dashboard (F19b): the numbers that prove the offline promise,
 /// rendered as iOS inset groups — stat pair on gradient plates, grouped
-/// facts/tools/storage/crash-log rows.
-class PrivacyDashboardScreen extends ConsumerStatefulWidget {
+/// facts/tools/crash-log rows.
+class PrivacyDashboardScreen extends ConsumerWidget {
   const PrivacyDashboardScreen({super.key});
 
   @override
-  ConsumerState<PrivacyDashboardScreen> createState() =>
-      _PrivacyDashboardScreenState();
-}
-
-class _PrivacyDashboardScreenState
-    extends ConsumerState<PrivacyDashboardScreen> {
-  int? _outputsBytes;
-  int? _outputsCount;
-  bool _clearing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshStorage();
-  }
-
-  Future<void> _refreshStorage() async {
-    final docs = await appDocumentsPath();
-    final dir = Directory('$docs${Platform.pathSeparator}outputs');
-    var bytes = 0;
-    var count = 0;
-    if (dir.existsSync()) {
-      for (final entity in dir.listSync(recursive: true)) {
-        if (entity is File) {
-          bytes += entity.lengthSync();
-          count++;
-        }
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _outputsBytes = bytes;
-        _outputsCount = count;
-      });
-    }
-  }
-
-  Future<void> _clearOutputs() async {
-    final loc = AppLocalizations.of(context)!;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(loc.clearOutputsTitle),
-        content: Text(loc.clearOutputsBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(loc.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(loc.clearOutputsConfirm),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => _clearing = true);
-    try {
-      final docs = await appDocumentsPath();
-      final dir = Directory('$docs${Platform.pathSeparator}outputs');
-      if (dir.existsSync()) dir.deleteSync(recursive: true);
-    } finally {
-      if (mounted) setState(() => _clearing = false);
-    }
-    await _refreshStorage();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final loc = AppLocalizations.of(context)!;
     final stats =
         ref.watch(usageStatsProvider).valueOrNull ?? const UsageStats();
@@ -179,31 +106,6 @@ class _PrivacyDashboardScreenState
             ),
           ],
 
-          PfSectionHeader(loc.storageOutputsTitle),
-          PfSection(
-            child: PfGroupItem(
-              title: loc.storageOutputsTitle,
-              subtitle: _outputsBytes == null
-                  ? loc.storageCalculating
-                  : loc.storageOutputsBody(
-                      _outputsCount ?? 0, formatMb(_outputsBytes ?? 0)),
-              leading: const _IconPlate(
-                  icon: Icons.folder_open_rounded, color: PfColors.categoryZip),
-              trailing: _clearing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : TextButton(
-                      onPressed: (_outputsCount ?? 0) == 0
-                          ? null
-                          : _clearOutputs,
-                      child: Text(loc.clearOutputsAction),
-                    ),
-              first: true,
-              last: true,
-            ),
-          ),
 
           PfSectionHeader(loc.crashLogTitle),
           PfSection(

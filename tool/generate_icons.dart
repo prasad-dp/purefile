@@ -125,7 +125,7 @@ void main() {
 /// Full-square icon with rounded corners. [platformPadding] adds the ~10%
 /// visual padding launchers expect on legacy icons.
 img.Image _drawIcon(int size, {required bool platformPadding}) {
-  final image = img.Image(width: size, height: size);
+  final image = img.Image(width: size, height: size, numChannels: 4);
   img.fill(image, color: img.ColorUint8.rgba(0, 0, 0, 0));
   final pad = platformPadding ? (size * 0.05).round() : 0;
   final rect = size - 2 * pad;
@@ -180,7 +180,7 @@ img.Image _drawAdaptiveBackground(int size) {
 /// Just the document mark, centered on a transparent [canvas]² layer
 /// (adaptive foreground).
 img.Image _drawMark(int area, {required int canvas}) {
-  final image = img.Image(width: canvas, height: canvas);
+  final image = img.Image(width: canvas, height: canvas, numChannels: 4);
   img.fill(image, color: img.ColorUint8.rgba(0, 0, 0, 0));
   _drawMarkInto(image, area: area, offset: (canvas - area) ~/ 2);
   return image;
