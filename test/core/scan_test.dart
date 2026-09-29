@@ -182,6 +182,29 @@ void main() {
     expect(p.g, p.b);
   });
 
+  test('enhanceDocument with preserveColor retains blue ink and stamps while whitening paper', () {
+    final im = img.Image(width: 200, height: 200, numChannels: 3);
+    img.fill(im, color: img.ColorRgb8(160, 160, 160)); // shadowed paper
+    // Blue signature line
+    img.fillRect(im,
+        x1: 40, y1: 80, x2: 120, y2: 95, color: img.ColorRgb8(20, 50, 210));
+    // Red stamp box
+    img.fillRect(im,
+        x1: 130, y1: 80, x2: 180, y2: 120, color: img.ColorRgb8(220, 30, 30));
+
+    final out = enhanceDocument(im, preserveColor: true);
+    // Paper is whitened
+    expect(out.getPixel(20, 20).luminance, greaterThan(200));
+    // Blue signature maintains blue dominance
+    final blueP = out.getPixel(60, 85);
+    expect(blueP.b, greaterThan(blueP.r + 50));
+    expect(blueP.b, greaterThan(blueP.g + 50));
+    // Red stamp maintains red dominance
+    final redP = out.getPixel(150, 100);
+    expect(redP.r, greaterThan(redP.g + 50));
+    expect(redP.r, greaterThan(redP.b + 50));
+  });
+
   // -------------------------------------------------------- processScanPage
 
   test('processScanPage crops, enhances and JPEG-encodes the page', () {

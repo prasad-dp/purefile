@@ -27,19 +27,21 @@ class QuadCorners {
 /// found (blank frame, dark table, or the document fills the whole frame).
 QuadCorners? detectDocumentQuad(
   img.Image image, {
-  int threshold = 128,
+  int? threshold,
   int minAreaFraction = 4,
 }) {
   final w = image.width;
   final h = image.height;
   if (w < 16 || h < 16) return null;
 
+  final effThreshold = threshold ?? _computeOtsuThreshold(image);
+
   // 1. Binarize by luminance: pages are bright against darker tables.
   final bright = Uint8List(w * h);
   for (var y = 0; y < h; y++) {
     for (var x = 0; x < w; x++) {
       final p = image.getPixel(x, y);
-      bright[y * w + x] = p.luminance >= threshold ? 1 : 0;
+      bright[y * w + x] = p.luminance >= effThreshold ? 1 : 0;
     }
   }
 
@@ -169,51 +171,109 @@ img.Image warpQuad(
   return out;
 }
 
-/// Grayscale + shadow clean: divides by a heavily blurred background estimate
-/// to lift shadows and even out vignetting, then a gentle smoothstep curve so
-/// paper reads white while ink stays dark.
+/// Adobe Scan style document enhancement: lifts shadows, removes vignetting
+/// and lighting gradients, whitens paper to clean pure white, darkens text,
+/// and preserves vibrant inks, stamps, logos, and signatures when [preserveColor]
+/// is true, or renders high-contrast clean paper grayscale when false.
 img.Image enhanceDocument(
   img.Image src, {
   int blockSize = 32,
+  bool preserveColor = true,
 }) {
   final w = src.width;
   final h = src.height;
   if (w < blockSize * 2 || h < blockSize * 2) {
     return img.grayscale(src);
   }
-  final gray = img.grayscale(src);
-  final bg = img.copyResize(
-    gray,
+
+  // 1. Build smooth background illumination map from downsampled average.
+  final bgSmall = img.copyResize(
+    src,
     width: (w / blockSize).ceil(),
     height: (h / blockSize).ceil(),
     interpolation: img.Interpolation.average,
   );
-  final full = img.copyResize(bg, width: w, height: h);
+  final bgFull = img.copyResize(
+    bgSmall,
+    width: w,
+    height: h,
+    interpolation: img.Interpolation.linear,
+  );
+
   final out = img.Image(width: w, height: h, numChannels: 3);
 
   for (var y = 0; y < h; y++) {
     for (var x = 0; x < w; x++) {
-      final g = gray.getPixel(x, y).luminance.toDouble();
-      final b = full.getPixel(x, y).luminance.toDouble().clamp(1, 255);
-      var v = (g / b * 255).round().clamp(0, 255);
-      final t = v / 255;
-      final s = t * t * (3 - 2 * t); // smoothstep
-      v = (255 * (0.12 * s + 0.88 * t)).round().clamp(0, 255);
-      out.setPixelRgba(x, y, v, v, v, 255);
+      final p = src.getPixel(x, y);
+      final bgPixel = bgFull.getPixel(x, y);
+
+      // Local background brightness with slight boost for text-heavy areas.
+      final bgLum = (bgPixel.luminance.toDouble() * 1.05 + 5.0).clamp(25.0, 255.0);
+      final gain = 255.0 / bgLum;
+
+      final rGain = (p.r * gain).clamp(0.0, 255.0);
+      final gGain = (p.g * gain).clamp(0.0, 255.0);
+      final bGain = (p.b * gain).clamp(0.0, 255.0);
+      final lumNorm = 0.299 * rGain + 0.587 * gGain + 0.114 * bGain;
+
+      double rOut, gOut, bOut;
+      if (lumNorm >= 175.0) {
+        // Smoothstep paper whitening
+        final t = ((lumNorm - 175.0) / 80.0).clamp(0.0, 1.0);
+        final s = t * t * (3.0 - 2.0 * t);
+        if (preserveColor) {
+          rOut = rGain * (1.0 - s) + 255.0 * s;
+          gOut = gGain * (1.0 - s) + 255.0 * s;
+          bOut = bGain * (1.0 - s) + 255.0 * s;
+        } else {
+          final v = lumNorm * (1.0 - s) + 255.0 * s;
+          rOut = gOut = bOut = v;
+        }
+      } else if (lumNorm < 130.0) {
+        // Ink and text deepening for clarity
+        final dFactor = 0.82 + 0.18 * (lumNorm / 130.0);
+        if (preserveColor) {
+          rOut = rGain * dFactor;
+          gOut = gGain * dFactor;
+          bOut = bGain * dFactor;
+        } else {
+          final v = lumNorm * dFactor;
+          rOut = gOut = bOut = v;
+        }
+      } else {
+        if (preserveColor) {
+          rOut = rGain;
+          gOut = gGain;
+          bOut = bGain;
+        } else {
+          rOut = gOut = bOut = lumNorm;
+        }
+      }
+
+      out.setPixelRgba(
+        x,
+        y,
+        rOut.round().clamp(0, 255),
+        gOut.round().clamp(0, 255),
+        bOut.round().clamp(0, 255),
+        255,
+      );
     }
   }
+
   return out;
 }
 
 /// Filter theme presets for scanned documents (Adobe Scan style).
 enum ScanFilter {
-  /// Clean document with shadow lifting and paper whitening.
+  /// Adobe Scan Auto Color: shadow lifting, paper whitening, and text darkening
+  /// while preserving rich original inks, stamps, logos, and signatures.
   enhanced,
 
   /// Preserves natural photo colors after perspective deskewing.
   original,
 
-  /// Smooth continuous-tone grayscale.
+  /// Clean continuous-tone grayscale with paper whitening and shadow removal.
   grayscale,
 
   /// Crisp high-contrast black & white for printable text.
@@ -367,3 +427,40 @@ List<double> _solveLinearSystem(List<double> a, List<double> b, int n) {
       ch(x0 + 1, y0 + 1, 2));
   return (r, g, b);
 }
+
+/// Computes the optimal binarization threshold via Otsu's method on the
+/// image's luminance histogram. Runs in sub-millisecond time.
+int _computeOtsuThreshold(img.Image image) {
+  final hist = List<int>.filled(256, 0);
+  final total = image.width * image.height;
+  for (var y = 0; y < image.height; y++) {
+    for (var x = 0; x < image.width; x++) {
+      final lum = image.getPixel(x, y).luminance.toInt().clamp(0, 255);
+      hist[lum]++;
+    }
+  }
+  var sum = 0.0;
+  for (var i = 0; i < 256; i++) {
+    sum += i * hist[i];
+  }
+  var sumB = 0.0;
+  var wB = 0;
+  var maxVar = 0.0;
+  var bestThreshold = 128;
+  for (var t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB == 0) continue;
+    final wF = total - wB;
+    if (wF == 0) break;
+    sumB += t * hist[t];
+    final mB = sumB / wB;
+    final mF = (sum - sumB) / wF;
+    final variance = wB.toDouble() * wF.toDouble() * (mB - mF) * (mB - mF);
+    if (variance > maxVar) {
+      maxVar = variance;
+      bestThreshold = t;
+    }
+  }
+  return bestThreshold.clamp(60, 200);
+}
+

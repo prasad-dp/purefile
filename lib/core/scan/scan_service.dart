@@ -59,8 +59,13 @@ ScanPage processScanPage(
     try {
       final quad = detectDocumentQuad(image);
       if (quad != null) {
-        final w = _edgeLength(quad.tl, quad.tr);
-        final h = _edgeLength(quad.tr, quad.br);
+        final topW = _edgeLength(quad.tl, quad.tr);
+        final bottomW = _edgeLength(quad.bl, quad.br);
+        final w = math.max(topW, bottomW);
+
+        final leftH = _edgeLength(quad.tl, quad.bl);
+        final rightH = _edgeLength(quad.tr, quad.br);
+        final h = math.max(leftH, rightH);
         // Guard against degenerate detections (thin slivers, single points).
         if (w >= 24 && h >= 24) {
           image = warpQuad(image, quad, w.round(), h.round());
@@ -72,9 +77,9 @@ ScanPage processScanPage(
   }
 
   image = switch (filter) {
-    ScanFilter.enhanced => enhanceDocument(image),
+    ScanFilter.enhanced => enhanceDocument(image, preserveColor: true),
     ScanFilter.original => image,
-    ScanFilter.grayscale => img.grayscale(image),
+    ScanFilter.grayscale => enhanceDocument(image, preserveColor: false),
     ScanFilter.monochrome => applyMonochrome(image),
   };
 

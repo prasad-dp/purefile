@@ -201,10 +201,10 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                   spacing: 8,
                   children: [
                     for (final f in [
-                      (ScanFilter.enhanced, 'Auto Clean'),
-                      (ScanFilter.original, 'Color'),
+                      (ScanFilter.enhanced, 'Auto Color'),
+                      (ScanFilter.original, 'Original'),
                       (ScanFilter.grayscale, 'Grayscale'),
-                      (ScanFilter.monochrome, 'B&W'),
+                      (ScanFilter.monochrome, 'B&W Text'),
                     ])
                       ChoiceChip(
                         label: Text(f.$2),
@@ -520,8 +520,8 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
 
   Widget _filterBar() {
     final filters = [
-      (ScanFilter.enhanced, 'Auto Clean', Icons.auto_fix_high_rounded),
-      (ScanFilter.original, 'Color', Icons.photo_camera_back_outlined),
+      (ScanFilter.enhanced, 'Auto Color', Icons.auto_fix_high_rounded),
+      (ScanFilter.original, 'Original', Icons.photo_camera_back_outlined),
       (ScanFilter.grayscale, 'Grayscale', Icons.filter_b_and_w_rounded),
       (ScanFilter.monochrome, 'B&W Text', Icons.text_snippet_outlined),
     ];
