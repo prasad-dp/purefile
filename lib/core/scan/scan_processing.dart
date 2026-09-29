@@ -230,8 +230,8 @@ img.Image enhanceDocument(
           rOut = gOut = bOut = v;
         }
       } else if (lumNorm < 130.0) {
-        // Ink and text deepening for clarity
-        final dFactor = 0.82 + 0.18 * (lumNorm / 130.0);
+        // Ink and text deepening for crisp contrast (Adobe Scan style)
+        final dFactor = 0.65 + 0.35 * (lumNorm / 130.0);
         if (preserveColor) {
           rOut = rGain * dFactor;
           gOut = gGain * dFactor;
