@@ -5,6 +5,10 @@
 -keep class io.flutter.view.** { *; }
 -keep class io.flutter.** { *; }
 -keep class io.flutter.plugins.** { *; }
+-dontwarn io.flutter.embedding.**
+
+# Play Store Core (Deferred Components referenced by Flutter engine)
+-dontwarn com.google.android.play.core.**
 
 # Google ML Kit Text Recognition
 -keep class com.google.mlkit.** { *; }
@@ -30,7 +34,15 @@
 # File Picker & OpenFileX & SharePlus
 -keep class com.mr.flutter.plugin.filepicker.** { *; }
 -keep class com.crazecoder.openfile.** { *; }
+-dontwarn com.crazecoder.openfile.**
 -keep class dev.fluttercommunity.plus.share.** { *; }
+-dontwarn dev.fluttercommunity.plus.share.**
+
+# Apache Tika & XML streaming (referenced by open_filex / Tika mime detector)
+-dontwarn org.apache.tika.**
+-dontwarn javax.xml.stream.**
+-dontwarn javax.xml.**
+-dontwarn org.w3c.dom.**
 
 # JNI, annotations and native methods
 -keepattributes *Annotation*
@@ -40,3 +52,4 @@
     native <methods>;
 }
 -dontwarn javax.annotation.**
+
