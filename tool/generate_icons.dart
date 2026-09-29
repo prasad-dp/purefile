@@ -190,9 +190,9 @@ void _fillGradient(img.Image image, int size,
   }
 }
 
-/// Adaptive background layer: full-bleed gradient.
+/// Adaptive background layer: full-bleed gradient with full opacity.
 img.Image _drawAdaptiveBackground(int size) {
-  final image = img.Image(width: size, height: size);
+  final image = img.Image(width: size, height: size, numChannels: 4);
   _fillGradient(image, size, from: teal, to: sapphire);
   return image;
 }
@@ -297,10 +297,11 @@ void _drawSparkle(img.Image image,
 img.ColorUint8 _lerpColor(int a, int b, double t) {
   final ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
   final br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
-  return img.ColorUint8.rgb(
+  return img.ColorUint8.rgba(
     ar + ((br - ar) * t).round(),
     ag + ((bg - ag) * t).round(),
     ab + ((bb - ab) * t).round(),
+    255,
   );
 }
 
