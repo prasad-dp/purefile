@@ -2,7 +2,8 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:flutter/services.dart'
+    show Clipboard, ClipboardData, FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:open_filex/open_filex.dart';
@@ -161,7 +162,8 @@ class _ToolFlowScreenState extends ConsumerState<ToolFlowScreen> {
               label: label,
               onCancel: controller.cancel,
             ),
-          JobDone(:final outputs) => _DoneStage(outputs: outputs),
+          JobDone(:final outputs, :final result) =>
+              _DoneStage(outputs: outputs, rawResult: result),
           JobError(:final error) => _ErrorStage(
               error: error,
               onRetry: controller.reset,
@@ -267,10 +269,17 @@ ToolUiSpec toolUiSpec(String toolId) {
     );
   }
   if (toolId == 'ocr') {
-    // F12: one PDF; optional page selection like pdf_to_images.
+    // Top-notch OCR: accepts 1 PDF or 1+ Images (reorderable).
     return const ToolUiSpec(
-      allowedMagic: {PfMagic.pdf},
-      maxFiles: 1,
+      allowedMagic: {
+        PfMagic.pdf,
+        PfMagic.jpeg,
+        PfMagic.png,
+        PfMagic.webp,
+        PfMagic.heic,
+      },
+      minFiles: 1,
+      reorderable: true,
       optionsBuilder: _buildOcrOptions,
     );
   }
@@ -362,14 +371,27 @@ Object? makeToolArgs({
     );
   }
   if (tool.id == 'ocr') {
-    final file = files.single;
     final opts = options is OcrOptionsState ? options : OcrOptionsState();
-    return OcrArgs(
-      inputPath: file.path,
-      outputDir: outputDir,
-      pages: opts.pages, // empty = all pages (service contract)
-      script: opts.script,
-    );
+    final isSinglePdf = files.length == 1 && files.single.magic == PfMagic.pdf;
+    if (isSinglePdf) {
+      return OcrArgs(
+        inputPath: files.single.path,
+        outputDir: outputDir,
+        pages: opts.pages, // empty = all pages (service contract)
+        script: opts.script,
+        enhanceImage: opts.enhanceImage,
+        preserveLayout: opts.preserveLayout,
+      );
+    } else {
+      return OcrArgs(
+        inputPath: files.first.path,
+        imagePaths: [for (final f in files) f.path],
+        outputDir: outputDir,
+        script: opts.script,
+        enhanceImage: opts.enhanceImage,
+        preserveLayout: opts.preserveLayout,
+      );
+    }
   }
   if (tool.id == 'images_to_pdf') {
     return ImagesToPdfArgs(
@@ -590,8 +612,8 @@ class OcrOptions extends ConsumerStatefulWidget {
 
 class _OcrOptionsState extends ConsumerState<OcrOptions> {
   static const _scripts = [
-    ('latin', 'Latin (English, French, Spanish, etc.)'),
-    ('devanagari', 'Devanagari (हिन्दी / Sanskrit)'),
+    ('latin', 'Latin (English, Spanish, French, German, etc.)'),
+    ('devanagari', 'Devanagari (हिन्दी / Marathi / Sanskrit)'),
     ('chinese', 'Chinese (中文)'),
     ('japanese', 'Japanese (日本語)'),
     ('korean', 'Korean (한국어)'),
@@ -599,7 +621,6 @@ class _OcrOptionsState extends ConsumerState<OcrOptions> {
 
   @override
   Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context)!;
     final options = ref.watch(ocrOptionsProvider);
     return Card(
       child: Padding(
@@ -610,11 +631,15 @@ class _OcrOptionsState extends ConsumerState<OcrOptions> {
             DropdownButtonFormField<String>(
               initialValue: options.script,
               decoration: const InputDecoration(
-                labelText: 'Script / Language',
+                labelText: 'Language / Script Model',
+                prefixIcon: Icon(Icons.language_rounded),
               ),
               items: [
                 for (final (id, label) in _scripts)
-                  DropdownMenuItem(value: id, child: Text(label)),
+                  DropdownMenuItem(
+                    value: id,
+                    child: Text(label, style: const TextStyle(fontSize: 13)),
+                  ),
               ],
               onChanged: (val) {
                 if (val != null) {
@@ -625,11 +650,39 @@ class _OcrOptionsState extends ConsumerState<OcrOptions> {
               },
             ),
             const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              secondary: const Icon(Icons.auto_fix_high_rounded),
+              title: const Text('Auto-Enhance for OCR'),
+              subtitle: const Text('Lifts shadows and boosts contrast for higher accuracy'),
+              value: options.enhanceImage,
+              onChanged: (v) {
+                setState(() {
+                  options.enhanceImage = v;
+                });
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              secondary: const Icon(Icons.format_align_left_rounded),
+              title: const Text('Preserve Natural Layout'),
+              subtitle: const Text('Maintains paragraphs, columns, and line structure'),
+              value: options.preserveLayout,
+              onChanged: (v) {
+                setState(() {
+                  options.preserveLayout = v;
+                });
+              },
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: options.pagesController,
-              decoration: InputDecoration(
-                labelText: loc.pagesLabel,
-                helperText: loc.pagesHint,
+              decoration: const InputDecoration(
+                labelText: 'Page Range (PDFs only)',
+                helperText: 'e.g. 1-3, 5 (leave blank for all pages or images)',
+                prefixIcon: Icon(Icons.pages_rounded),
               ),
             ),
           ],
@@ -1023,9 +1076,13 @@ class _RunningStage extends StatelessWidget {
 enum _OutputAction { saveAs, rename }
 
 class _DoneStage extends StatefulWidget {
-  const _DoneStage({required this.outputs});
+  const _DoneStage({
+    required this.outputs,
+    this.rawResult,
+  });
 
   final List<OutputInfo> outputs;
+  final Object? rawResult;
 
   @override
   State<_DoneStage> createState() => _DoneStageState();
@@ -1180,6 +1237,10 @@ class _DoneStageState extends State<_DoneStage> {
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleLarge,
         ),
+        if (widget.rawResult is OcrResult) ...[
+          const SizedBox(height: 16),
+          _OcrExtractedTextCard(result: widget.rawResult as OcrResult),
+        ],
         for (final output in _items) ...[
           if (output.savedPercent > 0)
             Padding(
@@ -1281,6 +1342,141 @@ class _DoneStageState extends State<_DoneStage> {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _OcrExtractedTextCard extends StatelessWidget {
+  const _OcrExtractedTextCard({required this.result});
+
+  final OcrResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = result.extractedText.trim();
+    final hasText = text.isNotEmpty && !result.noText;
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.text_snippet_rounded,
+                    color: scheme.onPrimaryContainer,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Recognized Text',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      if (hasText)
+                        Text(
+                          '${result.wordCount} words · ${result.characterCount} chars · ${result.pageCount} page(s)',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (hasText) ...[
+                  IconButton.filledTonal(
+                    tooltip: 'Copy all text',
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: text));
+                      PfHaptics.success();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Recognized text copied to clipboard'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton.filledTonal(
+                    tooltip: 'Share text',
+                    icon: const Icon(Icons.share_rounded, size: 18),
+                    onPressed: () {
+                      SharePlus.instance.share(ShareParams(text: text));
+                    },
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (!hasText)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.errorContainer.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: scheme.error, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'No text was detected on this document. Make sure the document is well-lit and oriented properly.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: scheme.onErrorContainer,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Container(
+                constraints: const BoxConstraints(maxHeight: 220),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+                ),
+                child: Scrollbar(
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      text,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontFamily: 'monospace',
+                            height: 1.45,
+                          ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

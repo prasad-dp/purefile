@@ -143,6 +143,7 @@ const List<PfTool> kPfTools = [
     subtitle: 'Searchable PDF + text',
     category: PfCategory.ocr,
     icon: Icons.text_snippet_rounded,
+    status: ToolStatus.available,
   ),
   PfTool(
     id: 'vault',

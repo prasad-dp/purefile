@@ -194,4 +194,107 @@ void main() {
     expect(r1.textPath != r2.textPath, isTrue);
   });
 
+  test('direct Image OCR produces searchable PDF and extracted text metrics', () async {
+    // Synthetic PNG image
+    final testImage = img.Image(width: 400, height: 600, numChannels: 3);
+    img.fill(testImage, color: img.ColorRgb8(240, 240, 240));
+    final pngPath = '${temp.path}${Platform.pathSeparator}receipt.png';
+    File(pngPath).writeAsBytesSync(img.encodePng(testImage));
+
+    final result = await ocrTask(
+      OcrArgs(inputPath: pngPath, outputDir: temp.path, enhanceImage: false),
+      recognize: (_) async => [
+        const OcrElement(
+          text: 'Receipt Total: \$42.50',
+          box: Rect.fromLTWH(20, 50, 200, 25),
+          blockIndex: 0,
+        ),
+        const OcrElement(
+          text: 'Thank you for shopping',
+          box: Rect.fromLTWH(20, 100, 250, 25),
+          blockIndex: 1,
+        ),
+      ],
+      renderPage: fakeRaster(),
+    );
+
+    expect(File(result.outputPath).existsSync(), isTrue);
+    expect(File(result.textPath).existsSync(), isTrue);
+    expect(result.pageCount, 1);
+    expect(result.noText, isFalse);
+    expect(result.wordCount, greaterThan(3));
+    expect(result.characterCount, greaterThan(10));
+    expect(result.extractedText, contains('Receipt Total: \$42.50'));
+    expect(result.extractedText, contains('Thank you for shopping'));
+
+    // Check searchable PDF extraction
+    final doc = PdfDocument(inputBytes: File(result.outputPath).readAsBytesSync());
+    final pdfExtracted = PdfTextExtractor(doc).extractText();
+    doc.dispose();
+    expect(pdfExtracted, contains('Receipt Total'));
+  });
+
+  test('multi-block layout preserves paragraphs with double newlines', () async {
+    final elements = [
+      const OcrElement(
+        text: 'Heading Title',
+        box: Rect.fromLTWH(50, 50, 200, 20),
+        blockIndex: 0,
+      ),
+      const OcrElement(
+        text: 'Paragraph body sentence one.',
+        box: Rect.fromLTWH(50, 100, 300, 18),
+        blockIndex: 1,
+      ),
+      const OcrElement(
+        text: 'Paragraph body sentence two.',
+        box: Rect.fromLTWH(50, 125, 300, 18),
+        blockIndex: 1,
+      ),
+    ];
+
+    final formatted = formatOcrText(elements, preserveLayout: true);
+    expect(formatted, contains('Heading Title\n\nParagraph body sentence one.'));
+    expect(formatted, contains('sentence one.\nParagraph body sentence two.'));
+  });
+
+  test('multi-image batch OCR creates single multi-page searchable PDF', () async {
+    final img1 = img.Image(width: 300, height: 400, numChannels: 3);
+    final img2 = img.Image(width: 300, height: 400, numChannels: 3);
+    final p1 = '${temp.path}${Platform.pathSeparator}doc_p1.png';
+    final p2 = '${temp.path}${Platform.pathSeparator}doc_p2.png';
+    File(p1).writeAsBytesSync(img.encodePng(img1));
+    File(p2).writeAsBytesSync(img.encodePng(img2));
+
+    var callCount = 0;
+    final result = await ocrTask(
+      OcrArgs(
+        imagePaths: [p1, p2],
+        outputDir: temp.path,
+        enhanceImage: false,
+      ),
+      recognize: (_) async => [
+        OcrElement(
+          text: 'Document Page ${++callCount}',
+          box: const Rect.fromLTWH(20, 40, 150, 20),
+          blockIndex: 0,
+        ),
+      ],
+      renderPage: fakeRaster(),
+    );
+
+    expect(result.pageCount, 2);
+    expect(File(result.outputPath).existsSync(), isTrue);
+    expect(File(result.textPath).existsSync(), isTrue);
+    expect(result.extractedText, contains('Document Page 1'));
+    expect(result.extractedText, contains('Document Page 2'));
+
+    final doc = PdfDocument(inputBytes: File(result.outputPath).readAsBytesSync());
+    expect(doc.pages.count, 2);
+    final extracted = PdfTextExtractor(doc).extractText();
+    doc.dispose();
+    expect(extracted, contains('Document Page 1'));
+    expect(extracted, contains('Document Page 2'));
+  });
 }
+

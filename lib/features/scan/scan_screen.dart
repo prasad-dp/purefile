@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
@@ -16,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/history/history_store.dart';
 import '../../core/pdf/images_to_pdf_service.dart';
 import '../../core/scan/scan_service.dart';
+import '../../core/share_intake/share_intake.dart';
 
 /// Document scan types (Adobe Scan modes).
 enum ScanDocType {
@@ -469,6 +469,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
                   label: const Text('Recognize Text (OCR)'),
                   onPressed: () {
                     Navigator.pop(sheetCtx);
+                    ref.read(shareIntakeProvider.notifier).intake([result.outputPath]);
                     context.push('/tools/ocr');
                   },
                 ),
@@ -553,7 +554,6 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
 
   Widget _buildCameraPreview() {
     if (_camReady && _controller != null) {
-      final size = MediaQuery.of(context).size;
       final previewSize = _controller!.value.previewSize;
       if (previewSize == null) return const SizedBox.shrink();
 

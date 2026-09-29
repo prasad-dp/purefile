@@ -3,10 +3,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image/image.dart' as img;
 import 'package:pdfx/pdfx.dart' as pdfx;
 
 import '../errors.dart';
 import '../pdf/ocr_service.dart';
+import '../scan/scan_processing.dart' show enhanceDocument;
 
 /// Device [PageRecognizer] backed by ML Kit with bundled models (no Play
 /// Services model downloads — models ship inside the APK, see
@@ -14,6 +16,7 @@ import '../pdf/ocr_service.dart';
 PageRecognizer mlkitPageRecognizer({
   TextRecognitionScript? script,
   String? scriptName,
+  bool enhanceForOcr = false,
 }) {
   final resolvedScript = script ??
       switch (scriptName?.toLowerCase()) {
@@ -24,24 +27,42 @@ PageRecognizer mlkitPageRecognizer({
         _ => TextRecognitionScript.latin,
       };
   return (Uint8List pageImageBytes) async {
+    // If enhancement requested, normalize contrast & paper illumination.
+    final Uint8List bytesToProcess;
+    if (enhanceForOcr) {
+      bytesToProcess = _preprocessForOcr(pageImageBytes);
+    } else {
+      bytesToProcess = pageImageBytes;
+    }
+
     // InputImage needs a path — stage the rendered PNG in a temp file.
     final tmp = File(
         '${Directory.systemTemp.path}${Platform.pathSeparator}pf_ocr_${DateTime.now().microsecondsSinceEpoch}.png');
     try {
-      await tmp.writeAsBytes(pageImageBytes, flush: true);
+      await tmp.writeAsBytes(bytesToProcess, flush: true);
       final inputImage = InputImage.fromFilePath(tmp.path);
       final recognizer = TextRecognizer(script: resolvedScript);
       try {
         final result = await recognizer.processImage(inputImage);
-        return [
-          for (final block in result.blocks)
-            for (final line in block.lines)
-              if (line.text.trim().isNotEmpty)
+        final elements = <OcrElement>[];
+        var blockIdx = 0;
+        for (final block in result.blocks) {
+          for (final line in block.lines) {
+            final t = line.text.trim();
+            if (t.isNotEmpty) {
+              elements.add(
                 OcrElement(
-                  text: line.text.trim(),
+                  text: t,
                   box: line.boundingBox,
+                  blockIndex: blockIdx,
+                  confidence: line.confidence,
                 ),
-        ];
+              );
+            }
+          }
+          blockIdx++;
+        }
+        return elements;
       } finally {
         await recognizer.close();
       }
@@ -52,6 +73,17 @@ PageRecognizer mlkitPageRecognizer({
       if (tmp.existsSync()) tmp.deleteSync();
     }
   };
+}
+
+Uint8List _preprocessForOcr(Uint8List rawBytes) {
+  try {
+    final decoded = img.decodeImage(rawBytes);
+    if (decoded == null) return rawBytes;
+    final enhanced = enhanceDocument(decoded, preserveColor: false);
+    return Uint8List.fromList(img.encodePng(enhanced));
+  } catch (_) {
+    return rawBytes;
+  }
 }
 
 /// Device [PageRaster]: pdfx render at 200 DPI-equivalent scale (the same

@@ -67,9 +67,16 @@ final imageConvertTargetProvider =
 final ocrOptionsProvider = StateProvider<OcrOptionsState>((_) => OcrOptionsState());
 
 final class OcrOptionsState {
-  OcrOptionsState({this.script = 'latin'}) : pagesController = TextEditingController();
+  OcrOptionsState({
+    this.script = 'latin',
+    this.enhanceImage = true,
+    this.preserveLayout = true,
+  }) : pagesController = TextEditingController();
+
   final TextEditingController pagesController;
   String script;
+  bool enhanceImage;
+  bool preserveLayout;
 
   /// Empty text = every page (the service clamps to real pages).
   List<int> get pages => parsePageSelection(pagesController.text);
@@ -199,8 +206,9 @@ final class JobRunning extends JobFlowState {
 }
 
 final class JobDone extends JobFlowState {
-  const JobDone({required this.outputs});
+  const JobDone({required this.outputs, this.result});
   final List<OutputInfo> outputs;
+  final Object? result;
 }
 
 final class JobError extends JobFlowState {
@@ -356,7 +364,7 @@ class JobFlowController extends Notifier<JobFlowState> {
             state = JobRunning(fraction: fraction, label: label);
           case runner.JobDone<Object?>(:final result):
             final outputs = _toOutputs(result);
-            state = JobDone(outputs: outputs);
+            state = JobDone(outputs: outputs, result: result);
             _recordHistory(outputs);
           case runner.JobFailed<Object?>(:final error):
             // A cancel triggers a JobFailed(JobCancelled) event too — keep
@@ -505,8 +513,11 @@ class JobFlowController extends Notifier<JobFlowState> {
           :final outputPath,
           :final outputBytes,
           :final textPath,
+          :final textBytes,
           :final pageCount,
           :final noText,
+          :final wordCount,
+          :final characterCount,
         ) =>
           [
             OutputInfo(
@@ -514,14 +525,16 @@ class JobFlowController extends Notifier<JobFlowState> {
               name: outputPath.split(Platform.pathSeparator).last,
               sizeBytes: outputBytes,
               warning: noText
-                  ? 'No text was recognized on any page'
-                  : 'Searchable PDF · $pageCount page(s) processed',
+                  ? 'No text detected'
+                  : 'Searchable PDF · $pageCount page(s) · $wordCount words',
             ),
             OutputInfo(
               path: textPath,
               name: textPath.split(Platform.pathSeparator).last,
-              sizeBytes: 0,
-              warning: 'Plain text — open to copy or share',
+              sizeBytes: textBytes > 0
+                  ? textBytes
+                  : (File(textPath).existsSync() ? File(textPath).lengthSync() : 0),
+              warning: 'Plain text · $characterCount chars',
             ),
           ],
         CopyThroughResult(:final outputs) => outputs,
@@ -642,7 +655,10 @@ Future<Object?> runToolTask(Object? args, runner.PfJobContext ctx) async {
     case OcrArgs():
       return ocrTask(
         args,
-        recognize: mlkitPageRecognizer(scriptName: args.script),
+        recognize: mlkitPageRecognizer(
+          scriptName: args.script,
+          enhanceForOcr: args.enhanceImage,
+        ),
         renderPage: ocrPageRaster,
         onProgress: ctx.report,
         isCancelled: () => ctx.isCancelled,

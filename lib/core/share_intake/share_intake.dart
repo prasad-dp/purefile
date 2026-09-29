@@ -60,6 +60,12 @@ class ShareIntake extends Notifier<List<String>> {
     state = paths;
   }
 
+  /// Manually intake paths into the share intake pipeline (e.g. from Scanner).
+  void intake(List<String> paths) {
+    if (paths.isEmpty) return;
+    state = paths;
+  }
+
   /// The chooser validated the user's tool pick; hand over and clear.
   List<String> consume() {
     final paths = state;
