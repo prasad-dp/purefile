@@ -128,7 +128,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
   Future<void> _capture() async {
     final ctrl = _controller;
     if (_busy || !_camReady || ctrl == null) return;
-    HapticFeedback.mediumImpact();
+    await HapticFeedback.mediumImpact();
     setState(() => _busy = true);
     try {
       final file = await ctrl.takePicture();
@@ -1179,6 +1179,7 @@ class _ReviewPagesModal extends StatelessWidget {
                   : ReorderableListView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       itemCount: pages.length,
+                      // ignore: deprecated_member_use
                       onReorder: onReorder,
                       itemBuilder: (ctx, i) {
                         final p = pages[i];
