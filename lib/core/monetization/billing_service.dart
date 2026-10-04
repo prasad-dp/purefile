@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -146,27 +147,27 @@ class BillingService {
         ),
       ];
     } else {
-      // Global Purchasing Power Parity (PPP) adjusted pricing
+      // Global Purchasing Power Parity (PPP) adjusted pricing ($1.59 Lifetime)
       _products = const [
         PfProductItem(
           id: PfProductIds.lifetime,
           title: 'Lifetime Unlock',
-          description: 'Pay once, own PureFile Pro forever · PPP Adjusted',
-          price: '\$2.99',
+          description: 'Pay once, own PureFile Pro forever · All features',
+          price: '\$1.59',
           isPopular: true,
         ),
         PfProductItem(
           id: PfProductIds.annual,
           title: 'Annual Plan',
-          description: '\$0.16/month · Billed annually with 3-day trial',
-          price: '\$1.99/yr',
+          description: '\$0.08/month · Billed annually with 3-day trial',
+          price: '\$0.99/yr',
           isPopular: false,
         ),
         PfProductItem(
           id: PfProductIds.monthly,
           title: 'Monthly Plan',
           description: 'Flexible monthly billing · Cancel anytime',
-          price: '\$0.49/mo',
+          price: '\$0.29/mo',
           isPopular: false,
         ),
       ];
