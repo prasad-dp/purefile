@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/monetization/monetization_providers.dart';
 import 'core/privacy/crash_log_store.dart';
 import 'core/share_intake/share_intake.dart';
 
@@ -45,6 +46,9 @@ class _ShareIntakeBootState extends ConsumerState<_ShareIntakeBoot> {
     super.initState();
     // Registers the cold-start pull + warm-share stream once for the app.
     ref.read(shareIntakeProvider.notifier).start();
+    // Initialize monetization and ads safely.
+    ref.read(billingServiceProvider).initialize();
+    ref.read(adsServiceProvider).initialize();
   }
 
   @override

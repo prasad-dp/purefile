@@ -8,6 +8,7 @@ import '../features/share/share_chooser_screen.dart';
 // Note: Scan and Sign features are developed in the 'dev' branch.
 // import '../features/scan/scan_screen.dart';
 // import '../features/sign/sign_screen.dart';
+import '../features/pro/pro_screen.dart';
 import '../features/settings/crash_log_screen.dart';
 import '../features/settings/privacy_dashboard_screen.dart';
 import '../features/settings/settings_screen.dart';
@@ -24,6 +25,7 @@ final GoRouter pfRouter = GoRouter(
   },
   routes: [
     GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+    GoRoute(path: '/pro', builder: (context, state) => const ProScreen()),
     GoRoute(path: '/onboarding', builder: (context, state) => const OnboardingScreen()),
     GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
     GoRoute(path: '/history', builder: (context, state) => const HistoryScreen()),

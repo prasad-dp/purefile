@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../core/appearance.dart';
 import '../../core/errors.dart' show formatMb;
+import '../../core/monetization/monetization_providers.dart';
 import '../../core/theme.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../widgets/ios_group.dart';
@@ -156,12 +157,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
     final mode = ref.watch(themeModeProvider);
+    final isPro = ref.watch(isProProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(loc.settingsTitle)),
       body: ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 32),
         children: [
+          const PfSectionHeader('Membership'),
+          PfSection(
+            child: PfGroupItem(
+              title: isPro ? 'PureFile Pro Active' : 'Upgrade to PureFile Pro',
+              subtitle: isPro
+                  ? 'All features unlocked · 100% ad-free'
+                  : '500 MB file cap, 100-file batches, zero ads',
+              leading: const _IconPlate(
+                icon: Icons.workspace_premium_rounded,
+                color: Color(0xFFF59E0B),
+              ),
+              trailing: isPro
+                  ? const Icon(Icons.verified_rounded, color: Color(0xFF10B981))
+                  : const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push('/pro'),
+              first: true,
+              last: true,
+            ),
+          ),
           PfSectionHeader(loc.appearanceSection),
           PfSection(
             child: Column(

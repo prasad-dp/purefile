@@ -32,7 +32,12 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     temp = Directory.systemTemp.createTempSync('pf_history');
-    container = ProviderContainer();
+    final fixedClock = DateTime(2026, 9, 24, 15);
+    container = ProviderContainer(
+      overrides: [
+        historyProvider.overrideWithValue(HistoryStore(clock: () => fixedClock)),
+      ],
+    );
   });
 
   tearDown(() {

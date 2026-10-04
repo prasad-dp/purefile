@@ -26,9 +26,11 @@ import '../../core/zip_service.dart';
 import '../../core/tools.dart';
 import '../../core/share_intake/share_intake.dart';
 import '../../core/theme.dart' show PfHaptics;
+import '../../core/monetization/monetization_providers.dart';
 import '../../core/validation/validator.dart';
 import '../../core/theme.dart' show PfColors;
 import '../../l10n/generated/app_localizations.dart';
+import '../../widgets/ad_banner_widget.dart';
 import '../../widgets/file_chip.dart';
 
 /// The shared pipeline every tool uses (docs/architecture.md):
@@ -1075,7 +1077,7 @@ class _RunningStage extends StatelessWidget {
 
 enum _OutputAction { saveAs, rename }
 
-class _DoneStage extends StatefulWidget {
+class _DoneStage extends ConsumerStatefulWidget {
   const _DoneStage({
     required this.outputs,
     this.rawResult,
@@ -1085,16 +1087,21 @@ class _DoneStage extends StatefulWidget {
   final Object? rawResult;
 
   @override
-  State<_DoneStage> createState() => _DoneStageState();
+  ConsumerState<_DoneStage> createState() => _DoneStageState();
 }
 
-class _DoneStageState extends State<_DoneStage> {
+class _DoneStageState extends ConsumerState<_DoneStage> {
   late List<OutputInfo> _items;
 
   @override
   void initState() {
     super.initState();
     _items = List<OutputInfo>.from(widget.outputs);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(adsServiceProvider).showInterstitialIfAllowed();
+      }
+    });
   }
 
   @override
@@ -1341,6 +1348,8 @@ class _DoneStageState extends State<_DoneStage> {
               ),
             ),
           ),
+        const SizedBox(height: 16),
+        const AdBannerWidget(),
       ],
     );
   }

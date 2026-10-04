@@ -1,17 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <!--
-      PureFile offline guarantee: this manifest intentionally declares NO
-      android.permission.INTERNET — and, because at least one transitive
-      Android library (ML Kit/GMS lineage) pulls it in via its own manifest,
-      the tools:node="remove" below strips it from the MERGED manifest no
-      matter who declares it. tools/egress_check.sh enforces this after
-      every build. Camera (scanner) + media read/save are the only
-      sensitive permissions.
+      Freemium Monetization: INTERNET permission enabled for Google AdMob
+      and Google Play In-App Billing verification.
     -->
-    <uses-permission
-        android:name="android.permission.INTERNET"
-        tools:node="remove" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission
@@ -29,6 +23,10 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round">
+        <!-- Google AdMob Application ID (official sample test app ID for Android) -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

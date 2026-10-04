@@ -12,6 +12,7 @@ import '../../core/history/history_store.dart';
 import '../../core/theme.dart';
 import '../../core/tools.dart';
 import '../../l10n/generated/app_localizations.dart';
+import '../../widgets/ad_banner_widget.dart';
 import '../../widgets/ios_group.dart';
 
 enum _HistoryItemAction { saveAs, rename }
@@ -70,6 +71,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final entries = _entries;
 
     return Scaffold(
+      bottomNavigationBar: const AdBannerWidget(),
       appBar: AppBar(
         title: Text(loc.historyTitle),
         actions: [

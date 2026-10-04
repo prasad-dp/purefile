@@ -53,3 +53,13 @@
 }
 -dontwarn javax.annotation.**
 
+# Google Mobile Ads (AdMob)
+-keep class com.google.android.gms.ads.** { *; }
+-dontwarn com.google.android.gms.ads.**
+-keep class io.flutter.plugins.googlemobileads.** { *; }
+
+# Google Play In-App Purchase / Billing
+-keep class com.android.billingclient.** { *; }
+-dontwarn com.android.billingclient.**
+-keep class io.flutter.plugins.inapppurchase.** { *; }
+

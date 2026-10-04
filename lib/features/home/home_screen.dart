@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme.dart';
 import '../../core/tools.dart';
 import '../../l10n/generated/app_localizations.dart';
+import '../../widgets/ad_banner_widget.dart';
 import '../../widgets/hero_header.dart';
 import '../../widgets/theme_toggle.dart';
 import '../../widgets/tool_card.dart';
@@ -93,6 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final crossAxisCount = width >= 900 ? 4 : (width >= 560 ? 3 : 2);
 
     return Scaffold(
+      bottomNavigationBar: const AdBannerWidget(),
       body: CustomScrollView(
         slivers: [
           SliverHeroHeader(
@@ -102,6 +104,11 @@ class _HomeScreenState extends State<HomeScreen> {
               background: Colors.white.withValues(alpha: 0.16),
             ),
             actions: [
+              HeroAction(
+                icon: Icons.workspace_premium_rounded,
+                tooltip: 'PureFile Pro',
+                onPressed: () => context.push('/pro'),
+              ),
               HeroAction(
                 icon: Icons.history_rounded,
                 tooltip: loc.historyTitle,
