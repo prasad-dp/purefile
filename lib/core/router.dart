@@ -5,11 +5,12 @@ import '../features/home/home_screen.dart';
 import '../features/history/history_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/share/share_chooser_screen.dart';
-import '../features/scan/scan_screen.dart';
+// Note: Scan and Sign features are developed in the 'dev' branch.
+// import '../features/scan/scan_screen.dart';
+// import '../features/sign/sign_screen.dart';
 import '../features/settings/crash_log_screen.dart';
 import '../features/settings/privacy_dashboard_screen.dart';
 import '../features/settings/settings_screen.dart';
-import '../features/sign/sign_screen.dart';
 import '../features/tools/tool_flow_screen.dart';
 import '../features/vault/vault_screen.dart';
 
@@ -33,11 +34,7 @@ final GoRouter pfRouter = GoRouter(
         builder: (context, state) => const CrashLogScreen()),
     GoRoute(
         path: '/share', builder: (context, state) => const ShareChooserScreen()),
-    // NOTE: static tool routes MUST precede the /tools/:toolId catch-all —
-    // go_router matches in declaration order and the parameterized route
-    // would otherwise shadow them (caught while wiring F13).
-    GoRoute(path: '/tools/scan', builder: (context, state) => const ScanScreen()),
-    GoRoute(path: '/tools/sign', builder: (context, state) => const SignScreen()),
+    // Static custom tool routes.
     GoRoute(path: '/tools/vault', builder: (context, state) => const VaultScreen()),
     GoRoute(path: '/tools/:toolId', builder: toolFlowBuilder),
   ],

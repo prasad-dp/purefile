@@ -17,7 +17,7 @@ class PureFileApp extends ConsumerStatefulWidget {
 class _PureFileAppState extends ConsumerState<PureFileApp> {
   /// Flow tools auto-fill from a pending share themselves; the custom-screen
   /// routes do not (F16).
-  static const _customToolPaths = {'/tools/scan', '/tools/sign', '/tools/vault'};
+  static const _customToolPaths = {'/tools/vault'};
 
   @override
   void initState() {

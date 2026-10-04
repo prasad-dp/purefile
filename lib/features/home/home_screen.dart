@@ -20,10 +20,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String _query = '';
   List<String> _pinnedToolIds = const [
-    'pdf-merge',
-    'pdf-compress',
-    'scan',
-    'sign',
+    'pdf_merge',
+    'pdf_compress',
+    'pdf_split',
+    'images_to_pdf',
   ];
 
   @override

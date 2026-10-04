@@ -119,33 +119,6 @@ const List<PfTool> kPfTools = [
   ),
   // Unique layer.
   PfTool(
-    id: 'scan',
-    route: '/tools/scan',
-    title: 'Scan Document',
-    subtitle: 'Camera → clean PDF',
-    category: PfCategory.scan,
-    icon: Icons.document_scanner_rounded,
-    status: ToolStatus.available,
-  ),
-  PfTool(
-    id: 'sign',
-    route: '/tools/sign',
-    title: 'Sign & Stamp',
-    subtitle: 'Draw, place, flatten',
-    category: PfCategory.sign,
-    icon: Icons.draw_rounded,
-    status: ToolStatus.available,
-  ),
-  PfTool(
-    id: 'ocr',
-    route: '/tools/ocr',
-    title: 'OCR Text',
-    subtitle: 'Searchable PDF + text',
-    category: PfCategory.ocr,
-    icon: Icons.text_snippet_rounded,
-    status: ToolStatus.available,
-  ),
-  PfTool(
     id: 'vault',
     route: '/tools/vault',
     title: 'Private Vault',
