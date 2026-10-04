@@ -147,27 +147,27 @@ class BillingService {
         ),
       ];
     } else {
-      // Global Purchasing Power Parity (PPP) adjusted pricing ($1.59 Lifetime)
+      // Global pricing
       _products = const [
         PfProductItem(
           id: PfProductIds.lifetime,
           title: 'Lifetime Unlock',
           description: 'Pay once, own PureFile Pro forever · All features',
-          price: '\$1.59',
+          price: '\$7.99',
           isPopular: true,
         ),
         PfProductItem(
           id: PfProductIds.annual,
           title: 'Annual Plan',
-          description: '\$0.08/month · Billed annually with 3-day trial',
-          price: '\$0.99/yr',
+          description: '\$0.41/month · Billed annually with 3-day trial',
+          price: '\$4.99/yr',
           isPopular: false,
         ),
         PfProductItem(
           id: PfProductIds.monthly,
           title: 'Monthly Plan',
           description: 'Flexible monthly billing · Cancel anytime',
-          price: '\$0.29/mo',
+          price: '\$0.99/mo',
           isPopular: false,
         ),
       ];
