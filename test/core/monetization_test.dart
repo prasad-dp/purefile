@@ -68,6 +68,13 @@ void main() {
       expect(statuses, contains(true));
       expect(statuses, contains(false));
     });
+
+    test('detects India locale correctly', () {
+      expect(BillingService.isIndiaLocale('en_IN'), isTrue);
+      expect(BillingService.isIndiaLocale('hi_IN'), isTrue);
+      expect(BillingService.isIndiaLocale('en_US'), isFalse);
+      expect(BillingService.isIndiaLocale('en_GB'), isFalse);
+    });
   });
 
   group('AdsService', () {

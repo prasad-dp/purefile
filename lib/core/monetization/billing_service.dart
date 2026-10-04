@@ -120,29 +120,67 @@ class BillingService {
   }
 
   void _populateFallbackProducts() {
-    _products = const [
-      PfProductItem(
-        id: PfProductIds.lifetime,
-        title: 'Lifetime Unlock',
-        description: 'Pay once, own PureFile Pro forever · All features',
-        price: '\$7.99',
-        isPopular: true,
-      ),
-      PfProductItem(
-        id: PfProductIds.annual,
-        title: 'Annual Plan',
-        description: '\$0.41/month · Billed annually with 3-day trial',
-        price: '\$4.99/yr',
-        isPopular: false,
-      ),
-      PfProductItem(
-        id: PfProductIds.monthly,
-        title: 'Monthly Plan',
-        description: 'Flexible monthly billing · Cancel anytime',
-        price: '\$0.99/mo',
-        isPopular: false,
-      ),
-    ];
+    final isIndia = isIndiaLocale();
+    if (isIndia) {
+      _products = const [
+        PfProductItem(
+          id: PfProductIds.lifetime,
+          title: 'Lifetime Unlock',
+          description: 'Pay once, own PureFile Pro forever · All features',
+          price: '₹49',
+          isPopular: true,
+        ),
+        PfProductItem(
+          id: PfProductIds.annual,
+          title: 'Annual Plan',
+          description: '₹2.4/month · Billed annually with 3-day trial',
+          price: '₹29/yr',
+          isPopular: false,
+        ),
+        PfProductItem(
+          id: PfProductIds.monthly,
+          title: 'Monthly Plan',
+          description: 'Flexible monthly billing · Cancel anytime',
+          price: '₹9/mo',
+          isPopular: false,
+        ),
+      ];
+    } else {
+      // Global Purchasing Power Parity (PPP) adjusted pricing
+      _products = const [
+        PfProductItem(
+          id: PfProductIds.lifetime,
+          title: 'Lifetime Unlock',
+          description: 'Pay once, own PureFile Pro forever · PPP Adjusted',
+          price: '\$2.99',
+          isPopular: true,
+        ),
+        PfProductItem(
+          id: PfProductIds.annual,
+          title: 'Annual Plan',
+          description: '\$0.16/month · Billed annually with 3-day trial',
+          price: '\$1.99/yr',
+          isPopular: false,
+        ),
+        PfProductItem(
+          id: PfProductIds.monthly,
+          title: 'Monthly Plan',
+          description: 'Flexible monthly billing · Cancel anytime',
+          price: '\$0.49/mo',
+          isPopular: false,
+        ),
+      ];
+    }
+  }
+
+  /// Detects whether the current device is in the India region.
+  static bool isIndiaLocale([String? overrideLocale]) {
+    try {
+      final loc = (overrideLocale ?? (kIsWeb ? '' : Platform.localeName)).toUpperCase();
+      return loc.endsWith('_IN') || loc.endsWith('-IN') || loc.contains('IN');
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Initiates purchase flow.
